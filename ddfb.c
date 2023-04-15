@@ -1002,7 +1002,8 @@ int main(int argc, char **argv)
         U_Printf("    sign     <bundle.ddf> <keyfile>\n");
         U_Printf("             Signs a bundle with a private key.\n");
         U_Printf("             The signature is appended only if it doesn't exist yet.\n");
-        result = 1;
+        if (argc == 1)
+            result = 0;
     }
 
     U_ScratchFree();
