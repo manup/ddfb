@@ -901,8 +901,8 @@ int ECC_Sign(const char *ddfpath, const char *keypath)
         return 0;
     }
 
-    /*** generate SHA256 over DDFB chunk data ************************/
-    lonesha256(&sha256[0], &bs.data[chunk.offset], chunk.size);
+    /*** generate SHA256 over DDFB chunk (header + data) *************/
+    lonesha256(&sha256[0], &bs.data[chunk.offset - 8], chunk.size + 8);
 
     U_Printf("SHA256: ");
     print_hex(&sha256[0], sizeof(sha256));
