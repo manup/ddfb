@@ -1,4 +1,4 @@
-vendor/secp256*
+vendor/micro-ecc
 ddfb
 ddfb.exe
 ddfb-db

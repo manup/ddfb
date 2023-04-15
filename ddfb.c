@@ -24,7 +24,8 @@
 #include "utils/utils.h"
 #include "utils/cj.h"
 
-#include "secp256k1.h"
+#include "uECC.h"
+
 #define LONESHA256_STATIC
 #include "vendor/lonesha256.h"
 
@@ -182,12 +183,6 @@ static int DDF_StoreBundle(const char *path, U_BStream *bs)
     bs->pos = 4;
     U_bstream_put_u32_le(bs, sz - 8);
     bs->pos = sz;
-
-    unsigned char sha256[32];
-    lonesha256(&sha256[0], bs->data, bs->pos);
-    U_Printf("SHA256: ");
-    print_hex(sha256, sizeof(sha256));
-    U_Printf("\n");
 
     if (PL_WriteFile(bundle_path, bs->data, sz) == 1)
     {
@@ -624,87 +619,54 @@ static int DDF_CreateBundle(const char *path)
     return DDF_StoreBundle(path, &bs);
 }
 
+static int uECC_RNG_Callback(uint8_t *dest, unsigned size)
+{
+    if (PL_FillRandom(dest, size) == 0)
+        return 0;
+    return 1;
+}
+
 int ECC_CreateKeyPair(const char *path)
 {
-    int ret;
     int result;
-    size_t len;
-    secp256k1_context *ctx;
-    secp256k1_pubkey pubkey;
-    unsigned char seckey[32];
-    unsigned char randomize[32];
+    U_SStream ss;
+    const struct uECC_Curve_t * curve;
+    unsigned char private_key[32];
+    unsigned char public_key[64];
     unsigned char compressed_pubkey[33];
     char outpath[PATH_MAX];
-    U_SStream ss;
 
-    U_bzero(seckey, sizeof(seckey));
-    U_bzero(compressed_pubkey, sizeof(compressed_pubkey));
+    uECC_set_rng(uECC_RNG_Callback);
 
-    result = 0;
+    curve = uECC_secp256k1();
 
-    if (PL_FillRandom(randomize, sizeof(randomize)) == 0)
+    if (uECC_make_key(public_key, private_key, curve) != 1)
     {
-        U_Printf("failed to generate randomness\n");
-        return result;
+        printf("uECC_make_key() failed\n");
+        return 0;
     }
 
-    ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
-    U_ASSERT(ctx);
-
-    /* Randomizing the context is recommended to protect against side-channel
-     * leakage See `secp256k1_context_randomize` in secp256k1.h for more
-     * information about it. This should never fail. */
-    ret = secp256k1_context_randomize(ctx, randomize);
-    U_ASSERT(ret);
-
-    /*** Key Generation ***/
-
-    /* If the secret key is zero or out of range (bigger than secp256k1's
-     * order), we try to sample a new key. Note that the probability of this
-     * happening is negligible. */
-    for (;;)
-    {
-        if (PL_FillRandom(seckey, sizeof(seckey)) == 0)
-        {
-            U_Printf("failed to generate randomness\n");
-            secp256k1_context_destroy(ctx);
-            return result;
-        }
-        if (secp256k1_ec_seckey_verify(ctx, seckey))
-            break;
-    }
-
-    /* Public key creation using a valid context with a verified secret key should never fail */
-    ret = secp256k1_ec_pubkey_create(ctx, &pubkey, seckey);
-    U_ASSERT(ret);
-
-    /* Serialize the pubkey in a compressed form(33 bytes). Should always return 1. */
-    len = sizeof(compressed_pubkey);
-    ret = secp256k1_ec_pubkey_serialize(ctx, compressed_pubkey, &len, &pubkey, SECP256K1_EC_COMPRESSED);
-    U_ASSERT(ret);
-    /* Should be the same size as the size of the output, because we passed a 33 byte array. */
-    U_ASSERT(len == sizeof(compressed_pubkey));
+    uECC_compress(public_key, compressed_pubkey, curve);
 
     U_sstream_init(&ss, &outpath[0], sizeof(outpath));
     U_sstream_put_str(&ss, path);
 
-    if (PL_WriteFile(ss.str, seckey, sizeof(seckey)) == 1)
+    if (PL_WriteFile(ss.str, private_key, sizeof(private_key)) == 1)
         result = 1;
 
     U_sstream_put_str(&ss, ".pub");
     if (PL_WriteFile(ss.str, compressed_pubkey, sizeof(compressed_pubkey)) == 1)
-        result = 1;
+        result += 1;
 
     U_Printf("private key: ");
-    print_hex(seckey, sizeof(seckey));
+    print_hex(private_key, sizeof(private_key));
     U_Printf("\n");
 
     U_Printf("public key:  ");
     print_hex(compressed_pubkey, sizeof(compressed_pubkey));
     U_Printf("\n");
 
-    secp256k1_context_destroy(ctx);
-    return result == 2;
+    return result == 2 ? 1 : 0;
 }
 
 static ChunkRef GetChunkRef(u8 *data, u32 size, u32 offset, const char *fourcc)
@@ -751,7 +713,7 @@ static ChunkRef GetChunkRef(u8 *data, u32 size, u32 offset, const char *fourcc)
     return result;
 }
 
-int ECC_FindSignature(const DDF_Signature *sig, u8 *ddf_data, u32 ddf_size)
+int ECC_FindSignature(const DDF_Signature *sig, u8 *ddf_data, u32 ddf_size, u8 *sha256, u8 *public_key)
 {
     u32 i;
     u16 len;
@@ -799,12 +761,9 @@ int ECC_FindSignature(const DDF_Signature *sig, u8 *ddf_data, u32 ddf_size)
 
         if (U_memcmp(sig1.compressed_pubkey, sig->compressed_pubkey, sizeof(sig->compressed_pubkey)) == 0)
         {
-            if (U_memcmp(sig1.serialized_signature, sig->serialized_signature, sizeof(sig->serialized_signature)) == 0)
-            {
+            if (uECC_verify(public_key, sha256, 32, sig1.serialized_signature, uECC_secp256k1()) == 1)
                 return 1;
-            }
         }
-
     }
 
     return 0;
@@ -863,8 +822,6 @@ int ECC_AppendSignature(const DDF_Signature *sig, u8 *ddf_data, u32 ddf_size, u3
 
 int ECC_Sign(const char *ddfpath, const char *keypath)
 {
-    U_UNUSED(keypath);
-
     int ret;
     int offset;
     u32 ddf_size;
@@ -872,13 +829,11 @@ int ECC_Sign(const char *ddfpath, const char *keypath)
     u8 *ddf_data;
     ChunkRef chunk;
     U_BStream bs;
-    size_t len;
-    secp256k1_context *ctx;
-    secp256k1_pubkey pubkey;
-    secp256k1_ecdsa_signature sig;
+    const struct uECC_Curve_t * curve;
     /* buffers */
     u8 sha256[32];
-    u8 seckey[32 + 1];
+    u8 private_key[32 + 1];
+    u8 public_key[64];
     DDF_Signature ddf_sig;
 
     PL_Stat statbuf;
@@ -896,7 +851,7 @@ int ECC_Sign(const char *ddfpath, const char *keypath)
         return 0;
     }
 
-    ret = PL_LoadFile(keypath, &seckey[0], sizeof(seckey));
+    ret = PL_LoadFile(keypath, &private_key[0], sizeof(private_key));
     if (ret != (int)statbuf.size)
     {
         U_Printf("failed to load private key: %s, ret: %d\n", keypath, ret);
@@ -957,49 +912,39 @@ int ECC_Sign(const char *ddfpath, const char *keypath)
 
     U_bzero(&ddf_sig, sizeof(ddf_sig));
 
-    ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
-    U_ASSERT(ctx);
+    curve = uECC_secp256k1();
+    uECC_set_rng(uECC_RNG_Callback);
 
-    if (secp256k1_ec_seckey_verify(ctx, seckey) == 0)
+    if (uECC_compute_public_key(private_key, public_key, curve) != 1)
     {
-        U_Printf("invalid private key data in %s\n", keypath);
-        secp256k1_context_destroy(ctx);
+        U_Printf("failed to compute public key from %s\n", keypath);
         return 0;
     }
 
     U_Printf("private key: ");
-    print_hex(&seckey[0], sizeof(seckey) - 1);
+    print_hex(&private_key[0], sizeof(private_key) - 1);
     U_Printf("\n");
 
-    /* public key from secret key */
-    ret = secp256k1_ec_pubkey_create(ctx, &pubkey, seckey);
-    U_ASSERT(ret);
-
-    /* serialize the pubkey in a compressed form(33 bytes). Should always return 1. */
-    len = sizeof(ddf_sig.compressed_pubkey);
-    ret = secp256k1_ec_pubkey_serialize(ctx, ddf_sig.compressed_pubkey, &len, &pubkey, SECP256K1_EC_COMPRESSED);
-    U_ASSERT(ret);
-    U_ASSERT(len == sizeof(ddf_sig.compressed_pubkey));
+    /* serialize the pubkey in a compressed form(33 bytes) */
+    uECC_compress(public_key, ddf_sig.compressed_pubkey, curve);
 
     U_Printf("public key: ");
     print_hex(&ddf_sig.compressed_pubkey[0], sizeof(ddf_sig.compressed_pubkey));
     U_Printf("\n");
 
     /* signing */
-    ret = secp256k1_ecdsa_sign(ctx, &sig, sha256, seckey, NULL, NULL);
-    U_ASSERT(ret);
 
-    ret = secp256k1_ecdsa_signature_serialize_compact(ctx, ddf_sig.serialized_signature, &sig);
-    U_ASSERT(ret);
+    if (uECC_sign(private_key, sha256, sizeof(sha256), ddf_sig.serialized_signature, curve) != 1)
+    {
+        return 0;
+    }
 
     U_Printf("signature: ");
     print_hex(ddf_sig.serialized_signature, sizeof(ddf_sig.serialized_signature));
     U_Printf("\n");
 
-    secp256k1_context_destroy(ctx);
-
     /* check if signature is already there */
-    if (ECC_FindSignature(&ddf_sig, ddf_data, statbuf.size))
+    if (ECC_FindSignature(&ddf_sig, ddf_data, statbuf.size, &sha256[0], &public_key[0]))
     {
         U_Printf("signature already present\n");
         return 1;

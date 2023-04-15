@@ -4,25 +4,15 @@ mkdir -p vendor
 
 pushd vendor
 
-SEC256K1_VERSION=0.3.1
-rm -f secp256k1.tar.gz secp256k1-*
+# micro-ecc
 
-curl -L -O https://github.com/bitcoin-core/secp256k1/archive/refs/tags/v${SEC256K1_VERSION}.tar.gz
-tar xf v${SEC256K1_VERSION}.tar.gz
-rm v${SEC256K1_VERSION}.tar.gz
+UECC_VERSION=1.1
 
-pushd secp256k1-${SEC256K1_VERSION}
-
-./autogen.sh
-./configure \
-    --disable-benchmark \
-    --disable-tests \
-    --disable-module-ecdh \
-    --disable-shared
-
-make
-
-popd
+rm -fr micro-ecc
+curl -L https://github.com/kmackay/micro-ecc/archive/refs/tags/v${UECC_VERSION}.zip > micro-ecc.zip
+unzip micro-ecc.zip
+rm -fr micro-ecc.zip
+mv micro-ecc-${UECC_VERSION} micro-ecc
 
 popd
 
