@@ -14,7 +14,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: deps
-      run: ./setup-deps.sh
+      run: bash ./setup-deps.sh
     - name: make
       run: make
     - name: print help
