@@ -3,9 +3,6 @@
 #include <ntstatus.h>
 #include <bcrypt.h>
 #include <sys/stat.h>
-//#include <time.h>
-// #include <unistd.h>
-
 
 static char _pl_config_dir_path[256];
 

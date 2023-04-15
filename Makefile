@@ -9,6 +9,10 @@ RELEASE_CFLAGS = -O2 -DRELEASE_BUILD
 PREFIX = /usr/local
 LDFLAGS = -lm
 
+ifeq ($(findstring mingw32,$(CC)),mingw32)
+    LDFLAGS += -lbcrypt
+endif
+
 all: ddfb
 
 uecc.o:

@@ -28,6 +28,12 @@ make
 
 This creates the `ddfb` command line cli tool with no external dependencies.
 
+3. Cross-compile for Windows using MinGW
+
+```
+make CC=x86_64-w64-mingw32-gcc
+```
+
 ## Usage
 
 ### 1. Creating a DDF bundle
