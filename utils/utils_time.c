@@ -36,6 +36,7 @@ int U_TimeToISO8601_UTC(U_time time, void *buf, unsigned len)
 {
     time_t t;
     struct tm tmt;
+    struct tm *mt;
     U_SStream ss;
     int millisec;
 
@@ -49,8 +50,15 @@ int U_TimeToISO8601_UTC(U_time time, void *buf, unsigned len)
     millisec = time % 1000;
 
     errno = 0;
+    /*
     if (!gmtime_r(&t, &tmt) ||  errno)
         return 0;
+    */
+
+    mt = gmtime(&t);
+    if (!mt || errno)
+        return 0;
+    tmt = *mt;
 
     U_sstream_init(&ss, (char*)buf, len);
     U_sstream_put_i32(&ss, tmt.tm_year + 1900);
