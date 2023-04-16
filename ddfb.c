@@ -39,6 +39,7 @@
 #include "utils/utils_time.c"
 #include "utils/cj.c"
 
+
 /*
 
    Cross compilation
@@ -49,6 +50,7 @@
 
 /* https://github.com/deconz-community/ddf-tools/blob/main/packages/bundler/README.md */
 
+#define U_PATH_MAX PATH_MAX
 #define CJ_MAX_TOKENS 1048576
 #define VAL_BUF_SIZE 4096
 
@@ -100,45 +102,44 @@ static void DDF_PutFourCC(U_BStream *bs, const char *tag)
     }
 }
 
-static extfile DDF_ResolveExtFile(const char *rpath, const char *path)
+static extfile DDF_ResolveExtFile(const char *abs_path, const char *path)
 {
     extfile f;
     int size;
     unsigned i;
     unsigned j;
-    unsigned x;
-    char *rpath1;
+    char *ext_abs_path;
     PL_Stat statbuf;
 
-    x = U_strlen(path);
-    rpath1 = U_ScratchAlloc(PATH_MAX);
-    U_ASSERT(rpath1 > path + (x+1));
+    ext_abs_path = U_ScratchAlloc(U_PATH_MAX);
+    U_ASSERT(ext_abs_path);
 
-    i = U_strlen(rpath);
-    for (;i && rpath[i] != '/'; i--)
+    i = U_strlen(abs_path);
+    U_ASSERT(i > 0);
+    for (;i && abs_path[i] != '/'; i--)
         ;
 
     if (i)
     {
-        U_memcpy(rpath1, rpath, i);
-        rpath1[i++] = '/';
-        rpath1[i] = '\0';
+        U_memcpy(ext_abs_path, abs_path, i);
+        ext_abs_path[i++] = '/';
+        ext_abs_path[i] = '\0';
     }
 
     for (j = 0; path[j]; j++)
-        rpath1[i + j] = path[j];
+        ext_abs_path[i + j] = path[j];
 
-    rpath1[i + j] = '\0';
+    ext_abs_path[i + j] = '\0';
 
     U_bzero(&f, sizeof(f));
 
-    if (rpath1[0])
+    if (ext_abs_path[0])
     {
         size = U_MEGA_BYTES(1);
         f.mem = U_ScratchAlloc(size);
-        f.size = PL_LoadFile(&rpath1[0], f.mem, size);
+        f.size = PL_LoadFile(&ext_abs_path[0], f.mem, size);
 
-        PL_StatFile(&rpath1[0], &statbuf);
+        PL_StatFile(&ext_abs_path[0], &statbuf);
 
         if (U_TimeToISO8601_UTC(statbuf.mtime, &f.mtime[0], sizeof(f.mtime)))
         {
@@ -154,29 +155,36 @@ static extfile DDF_ResolveExtFile(const char *rpath, const char *path)
 static int DDF_StoreBundle(const char *path, U_BStream *bs)
 {
     char *bundle_path;
+    unsigned i;
+    unsigned j;
     unsigned sz;
 
     if (bs->status != U_BSTREAM_OK)
         return 0;
 
     sz = U_strlen(path);
-    bundle_path = U_ScratchAlloc(sz + 16);
-
-    U_memcpy(bundle_path, path, sz + 1);
-    for (; sz && bundle_path[sz] != '.'; sz--)
+    for (i = U_strlen(path); i && path[i - 1] != '/'; --i)
         ;
 
-    if (sz == 0 || bundle_path[sz] != '.')
+    sz = U_strlen(&path[i]);
+    bundle_path = U_ScratchAlloc(sz + 16);
+
+    for (j = 0; i && path[i]; i++, j++)
+        bundle_path[j] = path[i];
+
+    bundle_path[j] = '\0';
+
+    if (bundle_path[j - 5] != '.')
     {
         U_Printf("path file extension '.' not found in %s\n", path);
         return 0;
     }
 
-    sz++;
-    bundle_path[sz++] = 'd';
-    bundle_path[sz++] = 'd';
-    bundle_path[sz++] = 'f';
-    bundle_path[sz++] = '\0';
+    j -= 4;
+    bundle_path[j++] = 'd';
+    bundle_path[j++] = 'd';
+    bundle_path[j++] = 'f';
+    bundle_path[j++] = '\0';
 
     /* write file size in RIFF header */
     sz = bs->pos;
@@ -462,13 +470,13 @@ static int DDF_CreateBundle(const char *path)
     int slen;
     int i;
     char *str;
-    char *rpath;
+    char *abs_path;
     unsigned extf_size_pos;
 
-    rpath = U_ScratchAlloc(PATH_MAX);
-    U_ASSERT(rpath);
+    abs_path = U_ScratchAlloc(U_PATH_MAX);
+    U_ASSERT(abs_path);
 
-    if (!PL_RealPath(path, rpath, PATH_MAX))
+    if (!PL_RealPath(path, abs_path, U_PATH_MAX))
     {
         U_Printf("failed to resolve: %s\n", path);
         return 0;
@@ -477,7 +485,7 @@ static int DDF_CreateBundle(const char *path)
     ddf = U_ScratchAlloc(tsize);
     U_ASSERT(ddf);
 
-    ddf_size = PL_LoadFile(rpath, ddf, tsize);
+    ddf_size = PL_LoadFile(abs_path, ddf, tsize);
     if (ddf_size <= 0)
     {
         U_Printf("failed to read: %s\n", path);
@@ -508,7 +516,7 @@ static int DDF_CreateBundle(const char *path)
     ss.str = U_ScratchAlloc(ss.len);
     ss.pos = 0;
 
-    if (DDF_MakeDescriptor(rpath, ddf, ddf_size, &ss) == 0)
+    if (DDF_MakeDescriptor(abs_path, ddf, ddf_size, &ss) == 0)
     {
         U_Printf("failed to make DESC chunk\n");
         return 0;
@@ -567,7 +575,7 @@ static int DDF_CreateBundle(const char *path)
             U_memcpy(str, &ddf[beg], slen);
             str[slen] = '\0';
 
-            extf = DDF_ResolveExtFile(rpath, str);
+            extf = DDF_ResolveExtFile(abs_path, str);
             if (extf.size == 0)
             {
               U_Printf("failed to resolve %s\n", str);
@@ -634,7 +642,7 @@ int ECC_CreateKeyPair(const char *path)
     unsigned char private_key[32];
     unsigned char public_key[64];
     unsigned char compressed_pubkey[33];
-    char outpath[PATH_MAX];
+    char outpath[U_PATH_MAX];
 
     uECC_set_rng(uECC_RNG_Callback);
 
