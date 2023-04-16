@@ -2,7 +2,7 @@
 .SUFFIXES:
 
 CC = cc
-CFLAGS = -D_POSIX_C_SOURCE -D_DEFAULT_SOURCE -DPL_POSIX -Wall  -Wextra \
+CFLAGS = -DPL_POSIX -Wall  -Wextra \
          -I./vendor/micro-ecc
 DBG_CFLAGS = -g3 -O0 -DDEBUG_BUILD
 RELEASE_CFLAGS = -O2 -DRELEASE_BUILD

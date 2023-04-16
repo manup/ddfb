@@ -50,10 +50,6 @@ int U_TimeToISO8601_UTC(U_time time, void *buf, unsigned len)
     millisec = time % 1000;
 
     errno = 0;
-    /*
-    if (!gmtime_r(&t, &tmt) ||  errno)
-        return 0;
-    */
 
     mt = gmtime(&t);
     if (!mt || errno)
