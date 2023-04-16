@@ -651,6 +651,7 @@ int ECC_CreateKeyPair(const char *path)
     U_sstream_init(&ss, &outpath[0], sizeof(outpath));
     U_sstream_put_str(&ss, path);
 
+    result = 0;
     if (PL_WriteFile(ss.str, private_key, sizeof(private_key)) == 1)
         result = 1;
 
