@@ -540,9 +540,9 @@ static int DDF_ResolveGenericItem(const char *generic_items_path, const char *it
 
     DDF_PutFourCC(bs, "JSON"); /* file type */
 
-    /* put path + '\0' */
-    U_bstream_put_u16_le(bs, U_strlen(rel_path) + 1);
-    for (i = 0; i < U_strlen(rel_path) + 1; i++)
+    /* put path without '\0' */
+    U_bstream_put_u16_le(bs, U_strlen(rel_path));
+    for (i = 0; i < U_strlen(rel_path); i++)
         U_bstream_put_u8(bs, rel_path[i]);
 
 
@@ -553,12 +553,11 @@ static int DDF_ResolveGenericItem(const char *generic_items_path, const char *it
         mtime[20] = '\0';
     }
 
-    /* modification time length incl. '\0' */
-    U_bstream_put_u16_le(bs, U_strlen(&mtime[0]) + 1);
+    /* modification time length without '\0' */
+    U_bstream_put_u16_le(bs, U_strlen(&mtime[0]));
     /* modification time in ISO 8601 format */
     for (i = 0; mtime[i]; i++)
         U_bstream_put_u8(bs, (u8)mtime[i]);
-    U_bstream_put_u8(bs, 0); /* '\0' */
 
     U_bstream_put_u32_le(bs, statbuf.size);
     for (i = 0; i < statbuf.size; i++)
@@ -831,17 +830,16 @@ static int DDF_CreateBundle(const char *path)
 
                 DDF_PutFourCC(&bs, "SCJS"); /* file type */
 
-                /* put path + '\0' */
-                U_bstream_put_u16_le(&bs, slen + 1);
-                for (i = 0; i < slen + 1; i++)
+                /* put path without '\0' */
+                U_bstream_put_u16_le(&bs, slen);
+                for (i = 0; i < slen; i++)
                     U_bstream_put_u8(&bs, str[i]);
 
-                /* modification time length incl. '\0' */
-                U_bstream_put_u16_le(&bs, U_strlen(&extf.mtime[0]) + 1);
+                /* modification time length without '\0' */
+                U_bstream_put_u16_le(&bs, U_strlen(&extf.mtime[0]));
                 /* modification time in ISO 8601 format */
                 for (i = 0; extf.mtime[i]; i++)
                     U_bstream_put_u8(&bs, (u8)extf.mtime[i]);
-                U_bstream_put_u8(&bs, 0); /* '\0' */
 
                 U_bstream_put_u32_le(&bs, extf.size);
                 for (i = 0; i < extf.size; i++)
