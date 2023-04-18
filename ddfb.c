@@ -74,6 +74,12 @@ typedef struct DDF_Signature
     u8 serialized_signature[64];
 } DDF_Signature;
 
+/* list of generic items (without duplicates) in mem_arena */
+static u32 generic_item_cache_count;
+static unsigned long generic_item_cache[1024];
+
+static U_Arena mem_arena; /* for non scratch memory */
+
 static void print_hex(unsigned char *data, unsigned size)
 {
     while(size)
@@ -102,7 +108,7 @@ static void DDF_PutFourCC(U_BStream *bs, const char *tag)
     }
 }
 
-static extfile DDF_ResolveExtFile(const char *abs_path, const char *path)
+static extfile DDF_ResolveExtFile(const char *abs_path, const char *ext_path)
 {
     extfile f;
     int size;
@@ -126,8 +132,8 @@ static extfile DDF_ResolveExtFile(const char *abs_path, const char *path)
         ext_abs_path[i] = '\0';
     }
 
-    for (j = 0; path[j]; j++)
-        ext_abs_path[i + j] = path[j];
+    for (j = 0; ext_path[j]; j++)
+        ext_abs_path[i + j] = ext_path[j];
 
     ext_abs_path[i + j] = '\0';
 
@@ -237,6 +243,9 @@ static int DDF_MakeDescriptor(const char *path, u8 *ddf, int ddf_size, U_SStream
     char *valbuf;
     int devid_count;
     PL_Stat statbuf;
+    unsigned scratch_pos;
+
+    scratch_pos = U_ScratchPos();
 
     U_ASSERT(ss->pos == 0);
 
@@ -445,6 +454,7 @@ static int DDF_MakeDescriptor(const char *path, u8 *ddf, int ddf_size, U_SStream
 
     U_Printf("\n%s\n", ss->str);
 
+    U_ScratchRestore(scratch_pos);
     return 1;
 
 err:
@@ -452,6 +462,235 @@ err:
 
 err_invalid_model_mfname:
     U_Printf("key 'manufacturername' or 'modelid' invalid\n");
+    return 0;
+}
+
+static int DDF_ResolveGenericItem(const char *generic_items_path, const char *item_name, U_BStream *bs)
+{
+    u8 *data;
+    unsigned i;
+    char *item_path;
+    const char *rel_path;
+    unsigned rel_path_start;
+    unsigned scratch_pos;
+    unsigned long hash;
+    unsigned extf_size_pos;
+    char mtime[32];
+    PL_Stat statbuf;
+    U_SStream ss;
+
+    scratch_pos = U_ScratchPos();
+
+    item_path = U_ScratchAlloc(U_PATH_MAX);
+
+    U_sstream_init(&ss, item_path, U_PATH_MAX);
+    U_sstream_put_str(&ss, generic_items_path);
+    U_sstream_put_str(&ss, "/");
+
+    i = ss.pos;
+    rel_path_start = i - U_strlen("generic/items") - 1;
+    rel_path = &item_path[rel_path_start];
+    U_sstream_put_str(&ss, item_name);
+
+    for (; i < ss.pos; i++)
+    {
+        if (ss.str[i] == '/')
+            ss.str[i] = '_';
+    }
+
+    U_sstream_put_str(&ss, "_item.json");
+
+    /* mark loaded files by remember the hash of relative path */
+    hash = U_hash_djb2(rel_path, U_strlen(rel_path));
+
+    for (i = 0; i < generic_item_cache_count; i++)
+    {
+        if (generic_item_cache[i] == hash)
+        {
+            /*U_Printf("%s already known\n", rel_path);*/
+            U_ScratchRestore(scratch_pos);
+            return 1;
+        }
+    }
+
+    generic_item_cache[generic_item_cache_count] = hash;
+    generic_item_cache_count++;
+
+    if (PL_StatFile(item_path, &statbuf) == 0)
+    {
+        U_Printf("failed to resolve '%s'\n", item_path);
+        return 0;
+    }
+
+    data = U_ScratchAlloc(statbuf.size + 16);
+
+    if (PL_LoadFile(item_path, data, statbuf.size + 16) != (int)statbuf.size)
+    {
+        U_Printf("failed to load: %s\n", item_path);
+        return 0;
+    }
+
+    /*U_Printf("add '%s' %u bytes\n", rel_path, statbuf.size);*/
+
+    /*****************************************************************/
+
+    DDF_PutFourCC(bs, "EXTF");
+    extf_size_pos = bs->pos;
+    U_bstream_put_u32_le(bs, 0); /* chunk size dummy */
+
+    DDF_PutFourCC(bs, "JSON"); /* file type */
+
+    /* put path + '\0' */
+    U_bstream_put_u16_le(bs, U_strlen(rel_path) + 1);
+    for (i = 0; i < U_strlen(rel_path) + 1; i++)
+        U_bstream_put_u8(bs, rel_path[i]);
+
+
+    if (U_TimeToISO8601_UTC(statbuf.mtime, &mtime[0], sizeof(mtime)))
+    {
+        /* cut off milliseconds .000Z */
+        mtime[19] = 'Z';
+        mtime[20] = '\0';
+    }
+
+    /* modification time length incl. '\0' */
+    U_bstream_put_u16_le(bs, U_strlen(&mtime[0]) + 1);
+    /* modification time in ISO 8601 format */
+    for (i = 0; mtime[i]; i++)
+        U_bstream_put_u8(bs, (u8)mtime[i]);
+    U_bstream_put_u8(bs, 0); /* '\0' */
+
+    U_bstream_put_u32_le(bs, statbuf.size);
+    for (i = 0; i < statbuf.size; i++)
+        U_bstream_put_u8(bs, data[i]);
+
+    /* EXTF chunk size */
+    i = (int)bs->pos;
+    bs->pos = extf_size_pos;
+    U_bstream_put_u32_le(bs, i - ((int)extf_size_pos + 4));
+    bs->pos = (unsigned)i;
+
+    U_ScratchRestore(scratch_pos);
+
+    return 1;
+}
+
+static int DDF_AddGenericItems(const char *abs_path, u8 *ddf, int ddf_size, U_BStream *bs)
+{
+    unsigned i;
+    cj_ctx cj;
+    cj_token *tok;
+    cj_token_ref ref_subdevices;
+    cj_token_ref ref_subdev;
+    cj_token_ref ref_items;
+    cj_token_ref ref_item_name;
+    char *valbuf;
+    PL_Stat statbuf;
+    unsigned scratch_pos;
+    unsigned tok_pos;
+    char *generic_items_path;
+    const char *test_path;
+
+    scratch_pos = U_ScratchPos();
+
+    valbuf = U_ScratchAlloc(VAL_BUF_SIZE);
+
+
+    /*** search generic/items directory ******************************/
+    /* walk dir tree from DDF up and look for generic/items/attr_id_item.json file.
+     */
+    generic_items_path = U_ScratchAlloc(U_PATH_MAX);
+    generic_items_path[0] = '\0';
+
+    i = U_strlen(abs_path);
+    U_memcpy(generic_items_path, abs_path, U_strlen(abs_path) + 1);
+
+    test_path = "generic/items/attr_id_item.json";
+    for (;i; i--)
+    {
+        if (generic_items_path[i - 1] == '/')
+        {
+            U_memcpy(&generic_items_path[i], test_path, U_strlen(test_path) + 1);
+
+            if (PL_StatFile(generic_items_path, &statbuf) != 0)
+                break;
+        }
+    }
+
+    if (i == 0)
+    {
+        U_Printf("failed to find generic items directory\n");
+        goto err;
+    }
+
+    U_memcpy(&generic_items_path[i], "generic/items", U_strlen("generic/items") + 1);
+
+    /*** parse JSON **************************************************/
+    cj.tokens = U_ScratchAlloc(CJ_MAX_TOKENS * sizeof(cj_token));
+    cj_parse_init(&cj, (char*)ddf, (unsigned)ddf_size, cj.tokens, CJ_MAX_TOKENS);
+
+    cj_parse(&cj);
+    if (cj.status != CJ_OK)
+    {
+        U_Printf("failed to parse JSON, status: %d\n", (int)cj.status);
+        goto err;
+    }
+
+    ref_subdevices = cj_value_ref(&cj, 0, "subdevices");
+    if (cj_is_valid_ref(&cj, ref_subdevices) == 0)
+    {
+        U_Printf("key 'subdevices' not found\n");
+        goto err;
+    }
+
+    for (tok_pos = ref_subdevices; tok_pos < cj.tokens_pos; tok_pos++)
+    {
+        tok = &cj.tokens[tok_pos];
+        if (tok->parent == ref_subdevices && tok->type == CJ_TOKEN_OBJECT_BEG)
+        {
+            ref_subdev = tok_pos;
+
+            ref_items = cj_value_ref(&cj, ref_subdev, "items");
+            if (cj_is_valid_ref(&cj, ref_items) == 0)
+            {
+                U_Printf("key 'items' not found\n");
+                goto err;
+            }
+
+            for (tok_pos = ref_items; tok_pos < cj.tokens_pos; tok_pos++)
+            {
+                tok = &cj.tokens[tok_pos];
+
+                if (tok->parent == ref_subdev && tok->type == CJ_TOKEN_OBJECT_END)
+                    break; /* end of items array */
+
+                if (tok->parent == ref_items && tok->type == CJ_TOKEN_OBJECT_BEG)
+                {
+                    ref_item_name = cj_value_ref(&cj, tok_pos, "name");
+                    if (cj_is_valid_ref(&cj, ref_item_name) == 0)
+                    {
+                        U_Printf("key item.'name' not found\n");
+                        goto err;
+                    }
+
+                    if (cj_copy_ref(&cj, valbuf, VAL_BUF_SIZE, ref_item_name) == 0)
+                        goto err;
+
+                    if (DDF_ResolveGenericItem(generic_items_path, valbuf, bs) == 0)
+                    {
+                        U_Printf("failed to resolve file for generic item: %s\n", valbuf);
+                        goto err;
+                    }
+                }
+            }
+        }
+    }
+
+    U_ScratchRestore(scratch_pos);
+    return 1;
+
+err:
+    U_ScratchRestore(scratch_pos);
     return 0;
 }
 
@@ -472,6 +711,8 @@ static int DDF_CreateBundle(const char *path)
     char *str;
     char *abs_path;
     unsigned extf_size_pos;
+
+    generic_item_cache_count = 0;
 
     abs_path = U_ScratchAlloc(U_PATH_MAX);
     U_ASSERT(abs_path);
@@ -535,9 +776,9 @@ static int DDF_CreateBundle(const char *path)
     for (i = 0; i < ddf_size; i++)
         U_bstream_put_u8(&bs, ddf[i]);
 
-    U_sstream_init(&ss, ddf, ddf_size);
 
     /*** EXTF chunk(s) ***********************************************/
+    U_sstream_init(&ss, ddf, ddf_size);
     while (U_sstream_at_end(&ss) == 0)
     {
        if (U_sstream_starts_with(&ss, "\"script\""))
@@ -616,6 +857,13 @@ static int DDF_CreateBundle(const char *path)
        }
 
        ss.pos++;
+    }
+
+    /*** EXTF chunk(s) generic items *********************************/
+    if (DDF_AddGenericItems(abs_path, ddf, ddf_size, &bs) == 0)
+    {
+        U_Printf("failed to add generic items\n");
+        return 0;
     }
 
     /* DDFB chunk size */
@@ -977,6 +1225,7 @@ int main(int argc, char **argv)
     result = 1;
     U_MemoryInit();
     U_ScratchInit(U_MEGA_BYTES(32));
+    U_InitArena(&mem_arena, U_MEGA_BYTES(16));
 
     ss.len = 2048;
     U_sstream_init(&ss, U_ScratchAlloc(ss.len), ss.len);
@@ -1015,6 +1264,7 @@ int main(int argc, char **argv)
             result = 0;
     }
 
+    U_FreeArena(&mem_arena);
     U_ScratchFree();
     U_MemoryFree();
 

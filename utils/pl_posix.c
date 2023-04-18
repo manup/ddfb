@@ -227,7 +227,7 @@ int PL_StatFile(const char *path, PL_Stat *st)
     st->size = 0;
     st->mtime = 0;
 
-    U_Printf("PL_Stat: %s, failed: %s\n", path, strerror(errno));
+    /*U_Printf("PL_Stat: %s, failed: %s\n", path, strerror(errno));*/
 
     return 0;
 }
