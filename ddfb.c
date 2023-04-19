@@ -52,8 +52,12 @@
 
 #ifdef _WIN32
   #define U_PATH_MAX MAX_PATH
+  #define DIR_SEP '\\'
+  #define DIR_SEP_STR "\\"
 #else
   #define U_PATH_MAX PATH_MAX
+  #define DIR_SEP '/'
+  #define DIR_SEP_STR "/"
 #endif
 
 #define CJ_MAX_TOKENS 1048576
@@ -120,6 +124,7 @@ static extfile DDF_ResolveExtFile(const char *abs_path, const char *ext_path)
     int size;
     unsigned i;
     unsigned j;
+    char ch;
     char *ext_abs_path;
     PL_Stat statbuf;
 
@@ -128,18 +133,23 @@ static extfile DDF_ResolveExtFile(const char *abs_path, const char *ext_path)
 
     i = U_strlen(abs_path);
     U_ASSERT(i > 0);
-    for (;i && abs_path[i] != '/'; i--)
+    for (;i && abs_path[i] != DIR_SEP; i--)
         ;
 
     if (i)
     {
         U_memcpy(ext_abs_path, abs_path, i);
-        ext_abs_path[i++] = '/';
+        ext_abs_path[i++] = DIR_SEP;
         ext_abs_path[i] = '\0';
     }
 
     for (j = 0; ext_path[j]; j++)
-        ext_abs_path[i + j] = ext_path[j];
+    {
+        ch = ext_path[j];
+        if (ch == '/' && DIR_SEP != '/') /* convert windows to unix paths */
+            ch = DIR_SEP;
+        ext_abs_path[i + j] = ch;
+    }
 
     ext_abs_path[i + j] = '\0';
 
@@ -175,7 +185,7 @@ static int DDF_StoreBundle(const char *path, U_BStream *bs)
         return 0;
 
     sz = U_strlen(path);
-    for (i = U_strlen(path); i && path[i - 1] != '/'; --i)
+    for (i = U_strlen(path); i && path[i - 1] != DIR_SEP; --i)
         ;
 
     sz = U_strlen(&path[i]);
@@ -258,10 +268,10 @@ static int DDF_ResolveBasePath(const char *abs_path)
 
     U_memcpy(&ddf_base_path[0], abs_path, i + 1);
 
-    test_path = "generic/items/attr_id_item.json";
+    test_path = "generic" DIR_SEP_STR "items" DIR_SEP_STR "attr_id_item.json";
     for (;i; i--)
     {
-        if (ddf_base_path[i - 1] == '/')
+        if (ddf_base_path[i - 1] == DIR_SEP)
         {
             U_memcpy(&ddf_base_path[i], test_path, U_strlen(test_path) + 1);
 
@@ -277,7 +287,6 @@ static int DDF_ResolveBasePath(const char *abs_path)
         return 0;
     }
 
-    ddf_base_path[i++] = '/';
     ddf_base_path[i] = '\0';
 
     return 1;
@@ -520,7 +529,7 @@ static int DDF_ResolveGenericItem(const char *generic_items_path, const char *it
     u8 *data;
     unsigned i;
     char *item_path;
-    const char *rel_path;
+    char *rel_path;
     unsigned rel_path_start;
     unsigned scratch_pos;
     unsigned long hash;
@@ -535,10 +544,10 @@ static int DDF_ResolveGenericItem(const char *generic_items_path, const char *it
 
     U_sstream_init(&ss, item_path, U_PATH_MAX);
     U_sstream_put_str(&ss, generic_items_path);
-    U_sstream_put_str(&ss, "/");
+    U_sstream_put_str(&ss, DIR_SEP_STR);
 
     i = ss.pos;
-    rel_path_start = i - U_strlen("generic/items") - 1;
+    rel_path_start = i - U_strlen("generic" DIR_SEP_STR "items") - 1;
     rel_path = &item_path[rel_path_start];
     U_sstream_put_str(&ss, item_name);
 
@@ -590,11 +599,17 @@ static int DDF_ResolveGenericItem(const char *generic_items_path, const char *it
 
     DDF_PutFourCC(bs, "JSON"); /* file type */
 
+    /* convert windows to unix path */
+    for (i = 0; rel_path[i]; i++)
+    {
+        if (rel_path[i] == '\\')
+            rel_path[i] = '/';
+    }
+
     /* put path without '\0' */
     U_bstream_put_u16_le(bs, U_strlen(rel_path));
     for (i = 0; i < U_strlen(rel_path); i++)
         U_bstream_put_u8(bs, rel_path[i]);
-
 
     if (U_TimeToISO8601_UTC(statbuf.mtime, &mtime[0], sizeof(mtime)))
     {
@@ -649,7 +664,7 @@ static int DDF_AddGenericItems(u8 *ddf, int ddf_size, U_BStream *bs)
 
     i = U_strlen(&ddf_base_path[0]);
     U_memcpy(generic_items_path, &ddf_base_path[0], i + 1);
-    U_memcpy(&generic_items_path[i], "generic/items", U_strlen("generic/items") + 1);
+    U_memcpy(&generic_items_path[i], "generic" DIR_SEP_STR "items", U_strlen("generic" DIR_SEP_STR "items") + 1);
 
     /*** parse JSON **************************************************/
     cj.tokens = U_ScratchAlloc(CJ_MAX_TOKENS * sizeof(cj_token));
@@ -760,7 +775,7 @@ static int DDF_CreateBundle(const char *path)
     ddf_size = PL_LoadFile(abs_path, ddf, tsize);
     if (ddf_size <= 0)
     {
-        U_Printf("failed to read: %s\n", path);
+        U_Printf("failed to read: %s\n", abs_path);
         return 0;
     }
 
@@ -902,7 +917,7 @@ static int DDF_CreateBundle(const char *path)
     U_bstream_put_u32_le(&bs, i - ((int)ddfb_size_pos + 4));
     bs.pos = (unsigned)i;
 
-    return DDF_StoreBundle(path, &bs);
+    return DDF_StoreBundle(abs_path, &bs);
 }
 
 static int uECC_RNG_Callback(uint8_t *dest, unsigned size)
