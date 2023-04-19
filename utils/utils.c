@@ -271,7 +271,7 @@ void U_qsort(void *base, unsigned long nmemb, unsigned long size,
 
 void U_sleepms(int ms)
 {
-#ifdef PL_WIN32
+#ifdef _WIN32
     Sleep(ms);
 #else
     usleep((useconds_t)ms * 1000);
@@ -357,76 +357,4 @@ float vec2_signed_area(const vec2 p1, const vec2 p2, const vec2 p3)
     return (p2[0] - p1[0]) * (p3[1] - p2[1]) - (p3[0] - p2[0]) * (p2[1] - p1[1]);
 }
 
-void CartesianToPolar(vec2 pol, const vec2 cartesian)
-{
-    float r;
-    float phi;
-    float xzero;
-
-    r = vec2_len(cartesian);
-    xzero = cartesian[1] > 0.0 ? U_PI * 0.5 : U_PI * -0.5;
-    phi = U_atan2f(cartesian[1], cartesian[0]);
-
-    phi = cartesian[0] == 0.0 ? xzero : phi;
-    phi = (phi < 0.0 ? phi + 2.0 * U_PI : phi);
-    pol[0] = r;
-    pol[1] = phi;
-}
-
-void PolarToCartesian(vec2 cartesian, const vec2 pol)
-{
-    cartesian[0] = pol[0] * U_cosf(pol[1]);
-    cartesian[1] = pol[0] * U_sinf(pol[1]);
-}
-
 #endif /* LINMATH_H */
-
-void U_WriteImagePPM(const char *path, const u8 *data, unsigned channels, unsigned width, unsigned height)
-{
-    FILE *f;
-    unsigned x;
-    unsigned y;
-
-    unsigned r;
-    unsigned g;
-    unsigned b;
-
-    if (!(channels == 1 || channels == 3 || channels == 4))
-        return;
-
-
-    U_Printf("write: %s\n", path);
-
-
-    f = fopen(path, "w");
-
-    if (!f)
-        return;
-
-    fprintf(f, "P3\n%u %u\n255\n", width, height);
-
-    for (y = 0; y < height; y++)
-    {
-        for (x = 0; x < width; x++)
-        {
-            r = data[y * height + x * channels];
-
-            if (channels == 3 || channels == 4)
-            {
-                g = data[y * height + x * channels + 1];
-                b = data[y * height + x * channels + 2];
-            }
-            else
-            {
-                g = r;
-                b = r;
-            }
-
-            fprintf(f, "%u %u %u\n", r, g, b);
-        }
-    }
-
-    fprintf(f, "\n");
-
-    fclose(f);
-}

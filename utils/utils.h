@@ -61,9 +61,6 @@ int PL_DeleteFile(const char *path);
 int PL_MakeDirectory(const char *path);
 int PL_StatFile(const char *path, PL_Stat *st);
 
-int U_LoadImage(const char *path, u8 *mem, unsigned memsize, int *x, int *y, int *comp);
-void U_WriteImagePPM(const char *path, const u8 *data, unsigned channels, unsigned width, unsigned height);
-
 void U_Printf(const char *format, ...);
 void U_Write(const char *str, unsigned len);
 
@@ -91,9 +88,6 @@ float vec2_angle(const vec2 a, const vec2 b);
 void vec2_proj(vec2 r, const vec2 a, const vec2 b);
 void vec2_perpendicular(vec2 r, const vec2 v);
 float vec2_signed_area(const vec2 p1, const vec2 p2, const vec2 p3);
-
-void CartesianToPolar(vec2 pol, const vec2 cartesian);
-void PolarToCartesian(vec2 cartesian, const vec2 pol);
 
 #endif /* LINMATH_H */
 

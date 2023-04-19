@@ -1,8 +1,13 @@
 
+#include <io.h>
+#include <direct.h>
 #include <windows.h>
-#include <ntstatus.h>
 #include <bcrypt.h>
 #include <sys/stat.h>
+
+#ifndef NT_SUCCESS
+#define NT_SUCCESS(Status) ((NTSTATUS)(Status) >= 0)
+#endif
 
 static char _pl_config_dir_path[256];
 
@@ -12,7 +17,7 @@ int PL_FillRandom(unsigned char *data, unsigned int size)
 {
     NTSTATUS res;
     res = BCryptGenRandom(NULL, data, size, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    if (res != STATUS_SUCCESS || size > ULONG_MAX) {
+    if (!NT_SUCCESS(res) || size > ULONG_MAX) {
         return 0;
     } else {
         return 1;
@@ -21,7 +26,6 @@ int PL_FillRandom(unsigned char *data, unsigned int size)
 #endif
 
 #ifndef _PL_LOAD_FILE_
-#if 0
 #define _PL_LOAD_FILE_
 int PL_LoadFile(const char *path, void *buf, unsigned bufsize)
 {
@@ -29,10 +33,16 @@ int PL_LoadFile(const char *path, void *buf, unsigned bufsize)
     U_ASSERT(buf);
     U_ASSERT(bufsize > 0);
 
-    FILE *f = fopen(path, "rb, ccs=UTF-8");
+    errno_t err;
+
+    FILE *f;
+
+    err = fopen_s(&f, path, "rb, ccs=UTF-8");
 
     if (!f)
         return 0;
+
+    U_ASSERT(err == 0);
 
     fseek(f, 0L, SEEK_END);
 
@@ -58,7 +68,25 @@ int PL_LoadFile(const char *path, void *buf, unsigned bufsize)
 
     return size;
 }
-#endif /* #if 0 */
+#endif
+
+#ifndef _PL_GET_TIME_
+#define _PL_GET_TIME_
+double PL_GetTime()
+{
+    LARGE_INTEGER now;
+    LARGE_INTEGER s_frequency;
+    BOOL s_use_qpc = QueryPerformanceFrequency(&s_frequency);
+    if (s_use_qpc)
+    {
+        QueryPerformanceCounter(&now);
+        return (double)((1000LL * now.QuadPart) / s_frequency.QuadPart);
+    }
+    else
+    {
+        return GetTickCount();
+    }
+}
 #endif
 
 #if !defined _PL_REALPATH
@@ -80,15 +108,17 @@ int PL_WriteFile(const char *path, const void *buf, unsigned bufsize)
     U_ASSERT(buf);
     U_ASSERT(bufsize > 8);
 
+    errno_t err;
+
     FILE *f;
     size_t n;
 
     if (bufsize == 0)
         return -1;
 
-    f = fopen(path, "wb");
+    err = fopen_s(&f, path, "wb");
 
-    if (!f)
+    if (!f || err)
         return -1;
 
     n = fwrite(buf, 1, (size_t)bufsize, f);
@@ -141,7 +171,7 @@ int PL_DeleteFile(const char *path)
     if (!PL_FileExists(path))
         return 0;
 
-    if (unlink(path) == 0)
+    if (_unlink(path) == 0)
         return 1;
 
     U_Printf("PL_DeleteFile: %s, failed: %s\n", path, strerror(errno));
@@ -156,7 +186,7 @@ int PL_MakeDirectory(const char *path)
     if (PL_FileExists(path))
         return 1;
 
-    if (mkdir(path) == 0)
+    if (_mkdir(path) == 0)
         return 1;
 
     U_Printf("PL_MakeDirectory: %s, failed: %s\n", path, strerror(errno));
@@ -164,6 +194,29 @@ int PL_MakeDirectory(const char *path)
     return 0;
 }
 #endif
+
+int PL_StatFile(const char *path, PL_Stat *st)
+{
+    int ret;
+    struct stat sb;
+
+    ret = stat(path, &sb);
+
+
+    if (ret == 0)
+    {
+        st->size = sb.st_size;
+        st->mtime = sb.st_mtime * 1000;
+        return 1;
+    }
+
+    st->size = 0;
+    st->mtime = 0;
+
+    /*U_Printf("PL_Stat: %s, failed: %s\n", path, strerror(errno));*/
+
+    return 0;
+}
 
 #ifndef _PL_CONFIG_DIR
 #define _PL_CONFIG_DIR
@@ -241,33 +294,3 @@ int PL_GetConfigFilePath(U_SStream *ss, const char *fname)
     return 1;
 }
 #endif
-
-void *U_LoadLibrary(const char *filename, int flags)
-{
-	U_UNUSED(flags);
-    HMODULE h;
-
-    h = LoadLibrary(filename);
-	return (void*)h;
-}
-
-void U_CloseLibrary(U_Library *handle)
-{
-	U_ASSERT(handle);
-    if (handle)
-	    FreeLibrary((HMODULE)handle);
-}
-
-void *U_GetLibrarySymbol(U_Library *handle, const char *symbol)
-{
-	U_ASSERT(handle);
-    U_ASSERT(symbol);
-    U_ASSERT(symbol[0]);
-
-    if (handle && symbol)
-    {
-        return (void*)GetProcAddress((HMODULE)handle, (LPCSTR)symbol);
-    }
-
-	return NULL;
-}

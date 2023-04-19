@@ -50,7 +50,12 @@
 
 /* https://github.com/deconz-community/ddf-tools/blob/main/packages/bundler/README.md */
 
-#define U_PATH_MAX PATH_MAX
+#ifdef _WIN32
+  #define U_PATH_MAX MAX_PATH
+#else
+  #define U_PATH_MAX PATH_MAX
+#endif
+
 #define CJ_MAX_TOKENS 1048576
 #define VAL_BUF_SIZE 4096
 

@@ -34,6 +34,32 @@ This creates the `ddfb` command line cli tool with no external dependencies.
 make CC=x86_64-w64-mingw32-gcc
 ```
 
+## Building on Windows with MSVC
+
+1. Compile dependencies
+
+```
+./setup_deps.sh
+```
+
+This downloads and compiles the Bitcoin secp256k1 static library used for signing.
+
+2. Compile `ddfb` tool
+
+Open a x64 Native Commandline Tools Command Prompt for VS 2022
+
+```
+cd ..
+mkdir ddfb-build
+cd ddfb-build
+cmake ../ddfb
+cmake --build . --config MinSizeRel
+
+```
+
+This creates the `ddfb` command line cli tool in with no external dependencies.
+
+
 ## Usage
 
 ### 1. Creating a DDF bundle

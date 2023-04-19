@@ -7,7 +7,7 @@ U_time U_TimeNow(void)
     struct timespec ts;
 
     /* timespec_get() since C11 */
-#if defined __STDC_VERSION__ && __STDC_VERSION__ >= 201112L && !defined(_WIN32)
+#if defined __STDC_VERSION__ && __STDC_VERSION__ >= 201112L || defined(_WIN32)
     if (timespec_get(&ts, TIME_UTC) == 0)
     {
         U_ASSERT(0 && "timespec_get error");
