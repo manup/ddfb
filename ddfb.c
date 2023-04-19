@@ -82,6 +82,7 @@ typedef struct DDF_Signature
 /* list of generic items (without duplicates) in mem_arena */
 static u32 generic_item_cache_count;
 static unsigned long generic_item_cache[1024];
+static char ddf_base_path[U_PATH_MAX];
 
 static U_Arena mem_arena; /* for non scratch memory */
 
@@ -236,6 +237,50 @@ static void U_sstream_put_js_str(U_SStream *ss, const char *str)
     U_sstream_put_str(ss, "\"");
     U_sstream_put_str(ss, str);
     U_sstream_put_str(ss, "\"");
+}
+
+static int DDF_ResolveBasePath(const char *abs_path)
+{
+    u32 i;
+    const char *test_path;
+    PL_Stat statbuf;
+
+    /*** search generic/items directory ******************************/
+    /* walk dir tree from DDF up and look for generic/items/attr_id_item.json file.
+     */
+    ddf_base_path[0] = '\0';
+
+    i = U_strlen(abs_path);
+
+    U_ASSERT(i + 1 < U_PATH_MAX);
+    if (i + 1 >= U_PATH_MAX)
+        return 0;
+
+    U_memcpy(&ddf_base_path[0], abs_path, i + 1);
+
+    test_path = "generic/items/attr_id_item.json";
+    for (;i; i--)
+    {
+        if (ddf_base_path[i - 1] == '/')
+        {
+            U_memcpy(&ddf_base_path[i], test_path, U_strlen(test_path) + 1);
+
+            if (PL_StatFile(&ddf_base_path[0], &statbuf) != 0)
+                break;
+        }
+    }
+
+    if (i == 0)
+    {
+        U_Printf("failed to find base directory\n");
+        ddf_base_path[0] = '\0';
+        return 0;
+    }
+
+    ddf_base_path[i++] = '/';
+    ddf_base_path[i] = '\0';
+
+    return 1;
 }
 
 static int DDF_MakeDescriptor(const char *path, u8 *ddf, int ddf_size, U_SStream *ss)
@@ -579,7 +624,7 @@ static int DDF_ResolveGenericItem(const char *generic_items_path, const char *it
     return 1;
 }
 
-static int DDF_AddGenericItems(const char *abs_path, u8 *ddf, int ddf_size, U_BStream *bs)
+static int DDF_AddGenericItems(u8 *ddf, int ddf_size, U_BStream *bs)
 {
     unsigned i;
     cj_ctx cj;
@@ -589,44 +634,21 @@ static int DDF_AddGenericItems(const char *abs_path, u8 *ddf, int ddf_size, U_BS
     cj_token_ref ref_items;
     cj_token_ref ref_item_name;
     char *valbuf;
-    PL_Stat statbuf;
     unsigned scratch_pos;
     unsigned tok_pos;
     char *generic_items_path;
-    const char *test_path;
 
     scratch_pos = U_ScratchPos();
 
     valbuf = U_ScratchAlloc(VAL_BUF_SIZE);
 
-
     /*** search generic/items directory ******************************/
     /* walk dir tree from DDF up and look for generic/items/attr_id_item.json file.
      */
     generic_items_path = U_ScratchAlloc(U_PATH_MAX);
-    generic_items_path[0] = '\0';
 
-    i = U_strlen(abs_path);
-    U_memcpy(generic_items_path, abs_path, U_strlen(abs_path) + 1);
-
-    test_path = "generic/items/attr_id_item.json";
-    for (;i; i--)
-    {
-        if (generic_items_path[i - 1] == '/')
-        {
-            U_memcpy(&generic_items_path[i], test_path, U_strlen(test_path) + 1);
-
-            if (PL_StatFile(generic_items_path, &statbuf) != 0)
-                break;
-        }
-    }
-
-    if (i == 0)
-    {
-        U_Printf("failed to find generic items directory\n");
-        goto err;
-    }
-
+    i = U_strlen(&ddf_base_path[0]);
+    U_memcpy(generic_items_path, &ddf_base_path[0], i + 1);
     U_memcpy(&generic_items_path[i], "generic/items", U_strlen("generic/items") + 1);
 
     /*** parse JSON **************************************************/
@@ -724,6 +746,11 @@ static int DDF_CreateBundle(const char *path)
     if (!PL_RealPath(path, abs_path, U_PATH_MAX))
     {
         U_Printf("failed to resolve: %s\n", path);
+        return 0;
+    }
+
+    if (DDF_ResolveBasePath(abs_path) == 0)
+    {
         return 0;
     }
 
@@ -863,7 +890,7 @@ static int DDF_CreateBundle(const char *path)
     }
 
     /*** EXTF chunk(s) generic items *********************************/
-    if (DDF_AddGenericItems(abs_path, ddf, ddf_size, &bs) == 0)
+    if (DDF_AddGenericItems(ddf, ddf_size, &bs) == 0)
     {
         U_Printf("failed to add generic items\n");
         return 0;
