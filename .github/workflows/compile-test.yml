@@ -19,3 +19,19 @@ jobs:
       run: make
     - name: print help
       run: ./ddfb
+  build-win:
+    name: Build with MSVC
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: ilammy/msvc-dev-cmd@v1
+    - name: Compile dependencies
+      run: bash ${GITHUB_WORKSPACE}/setup_deps.sh
+      shell: bash
+    - name: Compile ddfb
+      run: |
+        cmake .
+        cmake --build . --config MinSizeRel
+    - name: Print help
+      run: .\MinSizeRel\ddfb.exe
+      shell: cmd
