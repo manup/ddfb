@@ -8,7 +8,6 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -47,3 +46,18 @@ jobs:
       with:
         name: ddfb-win64
         path: .\MinSizeRel\ddfb.exe
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-ubuntu, build-win64]
+    name: Release
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/download-artifact@v3
+        id: download
+
+      - name: List downloaded artifacts
+        run: ls -R
+
+
+
