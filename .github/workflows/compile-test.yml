@@ -64,5 +64,10 @@ jobs:
       - name: List downloaded artifacts
         run: ls -R
 
-
-
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        draft: true
+        with:
+          files: |
+            ddfb-linux-amd64.zip
+            ddfb-windows-x64.zip
