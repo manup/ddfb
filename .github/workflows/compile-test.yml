@@ -56,6 +56,11 @@ jobs:
       - uses: actions/download-artifact@v3
         id: download
 
+      - name: Create archives
+        run: |
+          zip ddfb-linux-amd64.zip ddfb-linux-amd64/ddfb
+          zip ddfb-windows-x64.zip ddfb-windows-x64/ddfb.exe
+
       - name: List downloaded artifacts
         run: ls -R
 
