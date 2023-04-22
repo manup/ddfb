@@ -60,7 +60,7 @@ jobs:
 
       - name: Create archives
         run: |
-          zip ddfb-linux-amd64.zip ddfb-linux-amd64/ddfb
+          tar -czf ddfb-linux-amd64.tar.gz ddfb-linux-amd64/ddfb
           zip ddfb-windows-x64.zip ddfb-windows-x64/ddfb.exe
 
       - name: List downloaded artifacts
@@ -70,6 +70,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           draft: true
+          name: ${{ github.sha1 }}
+          generate_release_notes: true
           files: |
-            ddfb-linux-amd64.zip
+            ddfb-linux-amd64.tar.gz
             ddfb-windows-x64.zip
