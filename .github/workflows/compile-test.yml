@@ -15,12 +15,14 @@ jobs:
     - uses: actions/checkout@v3
     - name: deps
       run: bash ${GITHUB_WORKSPACE}/setup_deps.sh
-    - name: make
+    - name: Compile
       run: make
-    - name: print help
+    - name: Strip binary
+      run: strip -s ddfb
+    - name: Print help
       run: ./ddfb
     - name: Upload linux amd64 binary
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ddfb-amd64
         path: ddfb
@@ -41,7 +43,7 @@ jobs:
       run: .\MinSizeRel\ddfb.exe
       shell: cmd
     - name: Upload win64 binary
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ddfb-win64
         path: .\MinSizeRel\ddfb.exe
