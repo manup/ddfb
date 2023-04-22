@@ -60,7 +60,8 @@ jobs:
 
       - name: Create archives
         run: |
-          tar -czf ddfb-linux-amd64.tar.gz ddfb-linux-amd64/ddfb
+          chmod +x ddfb-linux-amd64/ddfb
+          tar -czf ddfb-linux-amd64.tar.gz -C ddfb-linux-amd64 .
           zip ddfb-windows-x64.zip ddfb-windows-x64/ddfb.exe
 
       - name: List downloaded artifacts
