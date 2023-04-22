@@ -19,6 +19,11 @@ jobs:
       run: make
     - name: print help
       run: ./ddfb
+    - name: Upload linux amd64 binary
+      uses: actions/upload-artifact@v2
+      with:
+        name: ddfb-amd64
+        path: ddfb
   build-win:
     name: Build with MSVC
     runs-on: windows-latest
@@ -35,3 +40,8 @@ jobs:
     - name: Print help
       run: .\MinSizeRel\ddfb.exe
       shell: cmd
+    - name: Upload win64 binary
+      uses: actions/upload-artifact@v2
+      with:
+        name: ddfb-win64
+        path: .\MinSizeRel\ddfb.exe
