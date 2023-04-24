@@ -39,7 +39,6 @@
 #include "utils/utils_time.c"
 #include "utils/cj.c"
 
-
 /*
 
    Cross compilation
@@ -60,8 +59,9 @@
   #define DIR_SEP_STR "/"
 #endif
 
-#define CJ_MAX_TOKENS 1048576
+#define MAX_CJ_TOKENS 32766
 #define VAL_BUF_SIZE 4096
+#define MAX_CONSTANTS 2048
 
 typedef struct
 {
@@ -87,6 +87,9 @@ typedef struct DDF_Signature
 static u32 generic_item_cache_count;
 static unsigned long generic_item_cache[1024];
 static char ddf_base_path[U_PATH_MAX];
+static char constants_mtime[32];
+static char *constants_content;
+static unsigned constants_content_size;
 
 static U_Arena mem_arena; /* for non scratch memory */
 
@@ -116,6 +119,73 @@ static void DDF_PutFourCC(U_BStream *bs, const char *tag)
         U_bstream_put_u8(bs, (u8)*tag);
         tag++;
     }
+}
+
+static int DDF_ResolveConstant(const char *constant, char *buf, unsigned bufsize)
+{
+    U_ASSERT(constants_content_size > 0);
+
+    cj_ctx cj;
+    cj_token *tok;
+    unsigned scratch_pos;
+    unsigned tok_pos;
+    unsigned constant_len;
+
+    scratch_pos = U_ScratchPos();
+    constant_len = U_strlen(constant);
+    buf[0] = '\0';
+
+    U_ASSERT(constant_len > 0);
+
+    /*** parse JSON **************************************************/
+    cj.tokens = U_ScratchAlloc(MAX_CJ_TOKENS * sizeof(cj_token));
+    cj_parse_init(&cj, (char*)constants_content, constants_content_size, cj.tokens, MAX_CJ_TOKENS);
+
+    cj_parse(&cj);
+    if (cj.status != CJ_OK)
+    {
+        U_Printf("failed to parse constants.json, status: %d\n", (int)cj.status);
+        goto err;
+    }
+
+    for (tok_pos = 1; tok_pos + 3 < cj.tokens_pos; tok_pos++)
+    {
+        tok = &cj.tokens[tok_pos];
+        if (tok[0].type != CJ_TOKEN_STRING)
+            continue;
+        if (tok[0].len != constant_len)
+            continue;
+        if (tok[1].type != CJ_TOKEN_NAME_SEP)
+            continue;
+        if (tok[2].type != CJ_TOKEN_STRING)
+            continue;
+        if (tok[2].len > bufsize - 1) /* need enough space */
+            continue;
+
+        U_ASSERT(tok->pos < cj.size);
+        if (cj.buf[tok->pos] != '$')
+            continue;
+
+        if (U_memcmp(&cj.buf[tok->pos], constant, constant_len) != 0)
+            continue;
+
+        if (cj_copy_ref(&cj, buf, bufsize, tok_pos + 2) == 0)
+            goto err;
+
+        break;
+    }
+
+    if (buf[0] != '\0')
+    {
+        U_Printf("resolved: %s -> %s\n", constant, buf);
+        U_ScratchRestore(scratch_pos);
+        return 1;
+    }
+
+err:
+    U_Printf("failed to resolve constant: %s\n", constant);
+    U_ScratchRestore(scratch_pos);
+    return 0;
 }
 
 static extfile DDF_ResolveExtFile(const char *abs_path, const char *ext_path)
@@ -300,6 +370,7 @@ static int DDF_MakeDescriptor(const char *path, u8 *ddf, int ddf_size, U_SStream
     cj_token_ref ref_mfname0;
     cj_token_ref ref_mfname1;
     char *valbuf;
+    char *valbuf1;
     int devid_count;
     PL_Stat statbuf;
     unsigned scratch_pos;
@@ -309,13 +380,14 @@ static int DDF_MakeDescriptor(const char *path, u8 *ddf, int ddf_size, U_SStream
     U_ASSERT(ss->pos == 0);
 
     valbuf = U_ScratchAlloc(VAL_BUF_SIZE);
+    valbuf1 = U_ScratchAlloc(VAL_BUF_SIZE);
 
     /* start descriptor object */
     U_sstream_put_str(ss, "{");
 
     /* parse JSON */
-    cj.tokens = U_ScratchAlloc(CJ_MAX_TOKENS * sizeof(cj_token));
-    cj_parse_init(&cj, (char*)ddf, (unsigned)ddf_size, cj.tokens, CJ_MAX_TOKENS);
+    cj.tokens = U_ScratchAlloc(MAX_CJ_TOKENS * sizeof(cj_token));
+    cj_parse_init(&cj, (char*)ddf, (unsigned)ddf_size, cj.tokens, MAX_CJ_TOKENS);
 
     cj_parse(&cj);
     if (cj.status != CJ_OK)
@@ -464,7 +536,17 @@ static int DDF_MakeDescriptor(const char *path, u8 *ddf, int ddf_size, U_SStream
 
             if (cj_copy_ref(&cj, valbuf, VAL_BUF_SIZE, ref_mfname1) == 0)
                 goto err_invalid_model_mfname;
-            U_sstream_put_js_str(ss, valbuf);
+
+            if (valbuf[0] == '$') /* resolve constant to actual mfname */
+            {
+                if (DDF_ResolveConstant(valbuf, valbuf1, VAL_BUF_SIZE) == 0)
+                    goto err_invalid_model_mfname;
+                U_sstream_put_js_str(ss, valbuf1);
+            }
+            else
+            {
+                U_sstream_put_js_str(ss, valbuf);
+            }
 
             U_sstream_put_str(ss, ",");
 
@@ -667,8 +749,8 @@ static int DDF_AddGenericItems(u8 *ddf, int ddf_size, U_BStream *bs)
     U_memcpy(&generic_items_path[i], "generic" DIR_SEP_STR "items", U_strlen("generic" DIR_SEP_STR "items") + 1);
 
     /*** parse JSON **************************************************/
-    cj.tokens = U_ScratchAlloc(CJ_MAX_TOKENS * sizeof(cj_token));
-    cj_parse_init(&cj, (char*)ddf, (unsigned)ddf_size, cj.tokens, CJ_MAX_TOKENS);
+    cj.tokens = U_ScratchAlloc(MAX_CJ_TOKENS * sizeof(cj_token));
+    cj_parse_init(&cj, (char*)ddf, (unsigned)ddf_size, cj.tokens, MAX_CJ_TOKENS);
 
     cj_parse(&cj);
     if (cj.status != CJ_OK)
@@ -735,6 +817,185 @@ err:
     return 0;
 }
 
+static int DDF_LoadConstants(void)
+{
+    U_SStream ss;
+    PL_Stat statbuf;
+    char *constants_path;
+
+    /*** search generic/items directory ******************************/
+    /* walk dir tree from DDF up and look for generic/items/attr_id_item.json file.
+     */
+    constants_content_size = 0;
+    constants_path = U_ScratchAlloc(U_PATH_MAX);
+    U_sstream_init(&ss, constants_path, U_PATH_MAX);
+
+    U_sstream_put_str(&ss, &ddf_base_path[0]);
+    U_sstream_put_str(&ss, "generic" DIR_SEP_STR "constants.json");
+
+     /*** load private key file ***************************************/
+    if (PL_StatFile(constants_path, &statbuf) != 1)
+    {
+        U_Printf("failed to open %s\n", constants_path);
+        return 0;
+    }
+
+    if (statbuf.size < 8)
+        return 0;
+
+    constants_content = U_ScratchAlloc(statbuf.size + 1);
+
+    if (PL_LoadFile(constants_path, constants_content, statbuf.size + 1) != (int)statbuf.size)
+    {
+        U_Printf("failed to read %s\n", constants_path);
+        return 0;
+    }
+
+    if (U_TimeToISO8601_UTC(statbuf.mtime, &constants_mtime[0], sizeof(constants_mtime)))
+    {
+        /* cut off milliseconds .000Z */
+        constants_mtime[19] = 'Z';
+        constants_mtime[20] = '\0';
+    }
+    else
+    {
+        constants_mtime[0] = '\0';
+    }
+
+    constants_content_size = statbuf.size;
+    return 1;
+}
+
+/** Adds a EXTF chunk with filtered constants (only the ones used in the DDF).
+ */
+static int DDF_AddConstants(u8 *ddf, int ddf_size, U_BStream *bs)
+{
+    cj_ctx cj;
+    cj_token *tok;
+    char *valbuf0;
+    char *valbuf1;
+    const char *path;
+    unsigned i;
+    unsigned scratch_pos;
+    unsigned tok_pos;
+    unsigned constants_cache_pos;
+    unsigned long *constants_cache;
+    unsigned long hash;
+    unsigned extf_size_pos;
+    unsigned len;
+    U_SStream ss;
+
+    scratch_pos = U_ScratchPos();
+
+    /* build filtered constants object */
+    ss.len = 16383; /* 16K should be enough */
+    ss.str = U_ScratchAlloc(ss.len);
+    U_sstream_init(&ss, ss.str, ss.len);
+
+    valbuf0 = U_ScratchAlloc(VAL_BUF_SIZE);
+    valbuf1 = U_ScratchAlloc(VAL_BUF_SIZE);
+    constants_cache_pos = 0;
+    constants_cache = U_ScratchAlloc(MAX_CONSTANTS * sizeof(*constants_cache));
+
+    /*** parse JSON **************************************************/
+    cj.tokens = U_ScratchAlloc(MAX_CJ_TOKENS * sizeof(cj_token));
+    cj_parse_init(&cj, (char*)ddf, (unsigned)ddf_size, cj.tokens, MAX_CJ_TOKENS);
+
+    cj_parse(&cj);
+    if (cj.status != CJ_OK)
+    {
+        U_Printf("failed to parse JSON, status: %d\n", (int)cj.status);
+        goto err;
+    }
+
+    U_sstream_put_str(&ss, "{");
+
+    for (tok_pos = 0; tok_pos < cj.tokens_pos; tok_pos++)
+    {
+        tok = &cj.tokens[tok_pos];
+        if (tok[0].type != CJ_TOKEN_STRING)
+            continue;
+
+        if (cj_copy_ref(&cj, valbuf0, VAL_BUF_SIZE, tok_pos) == 0)
+            goto err;
+
+        if (valbuf0[0] == '$')
+        {
+            if (valbuf0[1] < 'A' || valbuf0[1] > 'Z')
+                continue; /* only upper-case constants */
+
+            if (constants_cache_pos == MAX_CONSTANTS)
+            {
+                U_Printf("failed to add constant, cache size (%u) exhausted\n", MAX_CONSTANTS);
+                goto err;
+            }
+
+            hash = U_hash_djb2(valbuf0, U_strlen(valbuf0));
+
+            for (i = 0; i < constants_cache_pos; i++)
+            {
+                if (constants_cache[i] == hash)
+                    break;
+            }
+
+            if (i == constants_cache_pos) /* not in cache yet */
+            {
+                if (DDF_ResolveConstant(valbuf0, valbuf1, VAL_BUF_SIZE) == 0)
+                    goto err;
+
+                if (constants_cache_pos)
+                    U_sstream_put_str(&ss, ",");
+
+                U_sstream_put_js_str(&ss, valbuf0);
+                U_sstream_put_str(&ss, ":");
+                U_sstream_put_js_str(&ss, valbuf1);
+
+                constants_cache[constants_cache_pos] = hash;
+                constants_cache_pos++;
+            }
+        }
+    }
+
+    U_sstream_put_str(&ss, "}");
+
+    /*** add EXTF chunk **********************************************/
+    DDF_PutFourCC(bs, "EXTF");
+    extf_size_pos = bs->pos;
+    U_bstream_put_u32_le(bs, 0); /* chunk size dummy */
+
+    DDF_PutFourCC(bs, "JSON"); /* file type */
+
+    path = "generic/constants_min.json";
+    len = U_strlen(path);
+    /* put path without '\0' */
+    U_bstream_put_u16_le(bs, len);
+    for (i = 0; i < len; i++)
+        U_bstream_put_u8(bs, path[i]);
+
+    /* modification time length without '\0' */
+    U_bstream_put_u16_le(bs, U_strlen(&constants_mtime[0]));
+    /* modification time in ISO 8601 format */
+    for (i = 0; constants_mtime[i]; i++)
+        U_bstream_put_u8(bs, (u8)constants_mtime[i]);
+
+    U_bstream_put_u32_le(bs, ss.pos);
+    for (i = 0; i < ss.pos; i++)
+        U_bstream_put_u8(bs, (u8)ss.str[i]);
+
+    /* EXTF chunk size */
+    i = (int)bs->pos;
+    bs->pos = extf_size_pos;
+    U_bstream_put_u32_le(bs, i - ((int)extf_size_pos + 4));
+    bs->pos = (unsigned)i;
+
+    U_ScratchRestore(scratch_pos);
+    return 1;
+
+err:
+    U_ScratchRestore(scratch_pos);
+    return 0;
+}
+
 static int DDF_CreateBundle(const char *path)
 {
     u8 *ddf;
@@ -765,6 +1026,11 @@ static int DDF_CreateBundle(const char *path)
     }
 
     if (DDF_ResolveBasePath(abs_path) == 0)
+    {
+        return 0;
+    }
+
+    if (DDF_LoadConstants() == 0)
     {
         return 0;
     }
@@ -908,6 +1174,12 @@ static int DDF_CreateBundle(const char *path)
     if (DDF_AddGenericItems(ddf, ddf_size, &bs) == 0)
     {
         U_Printf("failed to add generic items\n");
+        return 0;
+    }
+
+    if (DDF_AddConstants(ddf, ddf_size, &bs) == 0)
+    {
+        U_Printf("failed to add constants\n");
         return 0;
     }
 
