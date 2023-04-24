@@ -1,31 +1,110 @@
-static int cj_is_valid_utf8(const unsigned char *str, unsigned len)
+/*
+ * Copyright (c) 2023 dresden elektronik ingenieurtechnik gmbh.
+ * All rights reserved.
+ *
+ * The software in this package is published under the terms of the BSD
+ * style license a copy of which has been included with this distribution in
+ * the LICENSE.txt file.
+ *
+ */
+
+#ifdef NDEBUG
+  #define CJ_ASSERT(c) ((void)0)
+#else
+  #if _MSC_VER
+    #define CJ_ASSERT(c) if (!(c)) __debugbreak()
+  #elif __GNUC__
+    #define CJ_ASSERT(c) if (!(c)) __builtin_trap()
+  #else
+    #define CJ_ASSERT assert
+  #endif
+#endif /* NDEBUG */
+
+/* Convert utf-8 to unicode code point.
+
+   Returns >0 as number of bytes in utf8 character, and 'codepoint' set
+   or 0 for invalid utf8, codepoint set to 0.
+
+ */
+static int cj_utf8_to_codepoint(const unsigned char *str, unsigned long len, unsigned long *codepoint)
 {
-    const char *s;
-    unsigned codepoint;
+    int result;
+    unsigned long cp;
+    unsigned bytes;
 
-    s = (const char*)str;
-    if (len < 2)
-        return CJ_INVALID_UTF8;
+    result = 0;
+    if (str && len != 0)
+        cp = (unsigned)*str & 0xFF;
+    else
+        goto invalid;
 
-    /* test valid utf8 codepoints */
-    for (; *s;)
+    for (bytes = 0; cp & 0x80; bytes++)
+        cp = (cp & 0x7F) << 1;
+
+    if (bytes == 0) /* ASCII */
     {
-        s = U_utf8_codepoint(s, &codepoint);
-
-        if (codepoint == 0)
-            return CJ_INVALID_UTF8;
+        *codepoint = cp;
+        return 1;
     }
+
+    if (bytes > 4 || bytes > len)
+        goto invalid;
+
+    result = (int)bytes;
+
+    /* 110xxxxx 10xxxxxx */
+    /* 1110xxxx 10xxxxxx 10xxxxxx */
+    /* 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx */
+    cp >>= bytes;
+    bytes--;
+    str++;
+
+    for (;bytes; bytes--, str++)
+    {
+        if (((unsigned)*str & 0xC0) != 0x80) /* must start with 10xxxxxx */
+            goto invalid;
+
+        cp <<= 6;
+        cp |= (unsigned)*str & 0x3F;
+    }
+
+    *codepoint = cp;
+    return result;
+
+invalid:
+    *codepoint = 0;
+    return 0;
+}
+
+static cj_status cj_is_valid_utf8(const unsigned char *str, unsigned long len)
+{
+    int ch_count;
+    unsigned long codepoint;
+
+    do /* test valid utf8 codepoints */
+    {
+        ch_count = cj_utf8_to_codepoint(str, len, &codepoint);
+        if (ch_count > 0)
+        {
+            str += ch_count;
+            len -= ch_count;
+        }
+        else
+        {
+            return CJ_INVALID_UTF8;
+        }
+    } while (ch_count > 0 && len > 0);
 
     return CJ_OK;
 }
 
-static unsigned cj_eat_white_space(const unsigned char *str)
+static unsigned cj_eat_white_space(const unsigned char *str, unsigned long len)
 {
-    unsigned result;
+    unsigned long result;
 
     result = 0;
 
-    for (; str[result]; )
+    for (; str[result] && result < len; )
     {
         switch(str[result])
         {
@@ -53,12 +132,6 @@ static int cj_is_primitive_char(unsigned char c)
             c == '.' || c == '-') ? 1 : 0;
 }
 
-static void cj_set_status(cj_ctx *ctx, cj_status status)
-{
-    ctx->status = status;
-    U_ASSERT(status == CJ_OK);
-}
-
 static int cj_alloc_token(cj_ctx *ctx, cj_token **tok)
 {
     int result;
@@ -76,7 +149,7 @@ static int cj_alloc_token(cj_ctx *ctx, cj_token **tok)
     }
     else
     {
-        *tok = NULL;
+        *tok = 0;
     }
 
     return result;
@@ -84,7 +157,8 @@ static int cj_alloc_token(cj_ctx *ctx, cj_token **tok)
 
 static unsigned cj_next_token(const unsigned char *str, unsigned len, unsigned pos, cj_token *tok)
 {
-    pos += cj_eat_white_space(&str[pos]);
+    CJ_ASSERT(pos <= len);
+    pos += cj_eat_white_space(&str[pos], len - pos);
 
     tok->type = CJ_TOKEN_INVALID;
     tok->pos = pos;
@@ -143,10 +217,32 @@ static unsigned cj_next_token(const unsigned char *str, unsigned len, unsigned p
     return pos;
 }
 
-void cj_parse_init(cj_ctx *ctx, char *json, unsigned len,
-                         cj_token *tokens, unsigned tokens_size)
+static void cj_trim_trailing_whitespace(cj_ctx *ctx)
 {
-    ctx->buf = (unsigned char*)json;
+    for (;ctx->size > 0;)
+    {
+        switch(ctx->buf[ctx->size - 1])
+        {
+        case ' ':
+        case '\t':
+        case '\r':
+        case '\n':
+        case '\0':
+            ctx->size--;
+            break;
+        default:
+            return;
+        }
+    }
+}
+
+void cj_parse_init(cj_ctx *ctx, const char *json, unsigned len,
+                   cj_token *tokens, unsigned tokens_size)
+{
+    if (!ctx)
+        return;
+
+    ctx->buf = (const unsigned char*)json;
     ctx->pos = 0;
     ctx->size = len;
 
@@ -154,7 +250,10 @@ void cj_parse_init(cj_ctx *ctx, char *json, unsigned len,
     ctx->tokens_pos = 0;
     ctx->tokens_size = tokens_size;
 
-    ctx->status = CJ_OK;
+    if (!json || len == 0 || !tokens || tokens_size < 8)
+        ctx->status = CJ_ERROR;
+    else
+        ctx->status = CJ_OK;
 }
 
 void cj_parse(cj_ctx *ctx)
@@ -174,7 +273,7 @@ void cj_parse(cj_ctx *ctx)
     if (ctx->status != CJ_OK)
         return;
 
-    /* printf("parse JSON: '%s'\n", (const char*)ctx->buf); */
+    cj_trim_trailing_whitespace(ctx);
 
     obj_depth = 0;
     arr_depth = 0;
@@ -185,9 +284,9 @@ void cj_parse(cj_ctx *ctx)
     do
     {
         tok_index = cj_alloc_token(ctx, &tok);
-        if (tok_index == CJ_INVALID_TOKEN_INDEX || tok == NULL)
+        if (tok_index == CJ_INVALID_TOKEN_INDEX || tok == 0)
         {
-            cj_set_status(ctx, CJ_PARSE_TOKENS_EXHAUSTED);
+            ctx->status = CJ_PARSE_TOKENS_EXHAUSTED;
             break;
         }
 
@@ -195,25 +294,24 @@ void cj_parse(cj_ctx *ctx)
 
         if (tok->type == CJ_TOKEN_INVALID)
         {
-            if (pos < ctx->size)
-                cj_set_status(ctx, CJ_PARSE_INVALID_TOKEN);
+            ctx->status = CJ_PARSE_INVALID_TOKEN;
             break;
         }
 
         tok->parent = tok_parent;
-        assert(tok->parent < (int)ctx->tokens_pos);
+        CJ_ASSERT(tok->parent < (int)ctx->tokens_pos);
 
         if (tok->type == CJ_TOKEN_OBJECT_BEG)
         {
             obj_depth++;
             tok_parent = tok_index;
-            assert(tok_parent < (int)ctx->tokens_pos);
+            CJ_ASSERT(tok_parent < (int)ctx->tokens_pos);
         }
         else if (tok->type == CJ_TOKEN_ARRAY_BEG)
         {
             arr_depth++;
             tok_parent = tok_index;
-            assert(tok_parent < (int)ctx->tokens_pos);
+            CJ_ASSERT(tok_parent < (int)ctx->tokens_pos);
         }
         else if (tok->type == CJ_TOKEN_OBJECT_END)
         {
@@ -222,9 +320,10 @@ void cj_parse(cj_ctx *ctx)
             {
                 break;
             }
-            assert(tok->parent >= 0);
+            CJ_ASSERT(tok->parent >= 0);
             tok_parent = ctx->tokens[tok->parent].parent;
-            assert(tok_parent < (int)ctx->tokens_pos);
+            tok->parent = tok_parent;
+            CJ_ASSERT(tok_parent < (int)ctx->tokens_pos);
         }
         else if (tok->type == CJ_TOKEN_ARRAY_END)
         {
@@ -233,9 +332,10 @@ void cj_parse(cj_ctx *ctx)
             {
                 break;
             }
-            assert(tok->parent >= 0);
+            CJ_ASSERT(tok->parent >= 0);
             tok_parent = ctx->tokens[tok->parent].parent;
-            assert(tok_parent < (int)ctx->tokens_pos);
+            tok->parent = tok_parent;
+            CJ_ASSERT(tok_parent < (int)ctx->tokens_pos);
         }
 
 #if 0
@@ -256,7 +356,7 @@ void cj_parse(cj_ctx *ctx)
         {
             if (tok_index < 2 || tok[-1].type != CJ_TOKEN_STRING)
             {
-                cj_set_status(ctx, CJ_PARSE_INVALID_TOKEN);
+                ctx->status = CJ_PARSE_INVALID_TOKEN;
                 break;
             }
         }
@@ -269,7 +369,7 @@ void cj_parse(cj_ctx *ctx)
                   tok->type == CJ_TOKEN_OBJECT_BEG ||
                   tok->type == CJ_TOKEN_ARRAY_BEG))
             {
-                cj_set_status(ctx, CJ_PARSE_INVALID_TOKEN);
+                ctx->status = CJ_PARSE_INVALID_TOKEN;
                 break;
             }
 
@@ -280,7 +380,7 @@ void cj_parse(cj_ctx *ctx)
                   tok->type == CJ_TOKEN_ARRAY_BEG))
             {
                 pos = tok[-1].pos;
-                cj_set_status(ctx, CJ_PARSE_INVALID_TOKEN);
+                ctx->status = CJ_PARSE_INVALID_TOKEN;
                 break;
             }
 
@@ -289,7 +389,7 @@ void cj_parse(cj_ctx *ctx)
                   tok->type == CJ_TOKEN_OBJECT_END ||
                   tok->type == CJ_TOKEN_ARRAY_END))
             {
-                cj_set_status(ctx, CJ_PARSE_INVALID_TOKEN);
+                ctx->status = CJ_PARSE_INVALID_TOKEN;
                 break;
             }
         }
