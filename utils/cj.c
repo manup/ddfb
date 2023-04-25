@@ -392,6 +392,16 @@ void cj_parse(cj_ctx *ctx)
                 ctx->status = CJ_PARSE_INVALID_TOKEN;
                 break;
             }
+
+            if (tok[-1].type == CJ_TOKEN_STRING &&
+                !(tok->type == CJ_TOKEN_ITEM_SEP ||
+                  tok->type == CJ_TOKEN_NAME_SEP ||
+                  tok->type == CJ_TOKEN_OBJECT_END ||
+                  tok->type == CJ_TOKEN_ARRAY_END))
+            {
+                ctx->status = CJ_PARSE_INVALID_TOKEN;
+                break;
+            }
         }
     }
     while (pos < ctx->size);
