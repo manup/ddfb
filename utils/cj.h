@@ -41,8 +41,8 @@ typedef enum cj_token_type
 typedef struct cj_token
 {
     cj_token_type type;
-    unsigned pos; /* position in JSON string */
-    unsigned len; /* length of the token in bytes */
+    unsigned long pos; /* position in JSON string */
+    unsigned long len; /* length of the token in bytes */
     cj_token_ref parent;
 } cj_token;
 
@@ -50,13 +50,13 @@ typedef struct cj_ctx
 {
     /* input JSON */
     const unsigned char *buf;
-    unsigned pos;
-    unsigned size;
+    unsigned long pos;
+    unsigned long size;
 
     /* parse */
     cj_token *tokens;
-    unsigned tokens_pos;
-    unsigned tokens_size;
+    unsigned long tokens_pos;
+    unsigned long tokens_size;
 
     cj_status status;
 } cj_ctx;
@@ -72,7 +72,7 @@ extern "C" {
  * \param tokens an array of tokens which can be filled by the parser.
  * \param tokens_size count of tokens.
  */
-void cj_parse_init(cj_ctx *ctx, const char *json, unsigned len, cj_token *tokens, unsigned tokens_size);
+void cj_parse_init(cj_ctx *ctx, const char *json, unsigned long len, cj_token *tokens, unsigned long tokens_size);
 
 /** Parses the formerly initialzed context.
  * \param ctx the CJ context.
@@ -112,7 +112,7 @@ int cj_copy_value(cj_ctx *ctx, char *buf, unsigned size, cj_token_ref obj, const
  * \param ref the token reference of the value.
  *
  * \return 1 on success
- *          0 on failure
+ *         0 on failure
  */
 int cj_copy_ref(cj_ctx *ctx, char *buf, unsigned size, cj_token_ref ref);
 

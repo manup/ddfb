@@ -87,7 +87,7 @@ static cj_status cj_is_valid_utf8(const unsigned char *str, unsigned long len)
         if (ch_count > 0)
         {
             str += ch_count;
-            len -= ch_count;
+            len -= (unsigned)ch_count;
         }
         else
         {
@@ -98,7 +98,7 @@ static cj_status cj_is_valid_utf8(const unsigned char *str, unsigned long len)
     return CJ_OK;
 }
 
-static unsigned cj_eat_white_space(const unsigned char *str, unsigned long len)
+static unsigned long cj_eat_white_space(const unsigned char *str, unsigned long len)
 {
     unsigned long result;
 
@@ -129,18 +129,19 @@ static int cj_is_primitive_char(unsigned char c)
     return ((c >= '0' && c <= '9') ||
             (c >= 'a' && c <= 'z') ||
             (c >= 'A' && c <= 'Z') ||
-            c == '.' || c == '-') ? 1 : 0;
+            c == '+' || c == '.' || c == '-') ? 1 : 0;
 }
 
-static int cj_alloc_token(cj_ctx *ctx, cj_token **tok)
+static cj_token_ref cj_alloc_token(cj_ctx *ctx, cj_token **tok)
 {
-    int result;
+    cj_token_ref result;
 
     result = CJ_INVALID_TOKEN_INDEX;
 
     if (ctx->tokens_pos < ctx->tokens_size)
     {
-        result = ctx->tokens_pos;
+        CJ_ASSERT((cj_token_ref)ctx->tokens_pos >= 0);
+        result = (cj_token_ref)ctx->tokens_pos;
         ctx->tokens_pos++;
 
         *tok = &ctx->tokens[result];
@@ -155,20 +156,26 @@ static int cj_alloc_token(cj_ctx *ctx, cj_token **tok)
     return result;
 }
 
-static unsigned cj_next_token(const unsigned char *str, unsigned len, unsigned pos, cj_token *tok)
+static unsigned long cj_next_token(const unsigned char *str, unsigned long len, unsigned long pos, cj_token *tok)
 {
+    int esc;
+    unsigned char ch;
+
     CJ_ASSERT(pos <= len);
     pos += cj_eat_white_space(&str[pos], len - pos);
 
     tok->type = CJ_TOKEN_INVALID;
     tok->pos = pos;
     tok->len = 0;
+    esc = 0;
 
     for (;pos < len; pos++)
     {
+        ch = str[pos];
+
         if (tok->type == CJ_TOKEN_INVALID)
         {
-            switch (str[pos])
+            switch (ch)
             {
                 case '{': tok->type = CJ_TOKEN_OBJECT_BEG; tok->len = 1; return ++pos;
                 case '}': tok->type = CJ_TOKEN_OBJECT_END; tok->len = 1; return ++pos;
@@ -184,7 +191,7 @@ static unsigned cj_next_token(const unsigned char *str, unsigned len, unsigned p
             if (tok->type != CJ_TOKEN_INVALID)
                 continue;
 
-            if (cj_is_primitive_char(str[pos]))
+            if (cj_is_primitive_char(ch))
             {
                 tok->type = CJ_TOKEN_PRIMITIVE;
                 tok->len = 1;
@@ -196,8 +203,59 @@ static unsigned cj_next_token(const unsigned char *str, unsigned len, unsigned p
         }
         else if (tok->type == CJ_TOKEN_STRING)
         {
-            if (str[pos] == '\"' && str[pos - 1] != '\\')
-                return ++pos;
+            if (esc == 0)
+            {
+                if (ch == '\"') /* end of string */
+                    return ++pos;
+
+                if (ch < 0x20) /* needs to be escaped */
+                {
+                    tok->type = CJ_TOKEN_INVALID;
+                    return pos;
+                }
+
+                if (ch == '\\')
+                    esc = 1;
+            }
+            else if (esc == 1)
+            {
+                switch (ch)
+                {
+                case '"':
+                case 'n':
+                case '\\':
+                case '/':
+                case 't':
+                case 'r':
+                case 'b':
+                case 'f':
+                    esc = 0;
+                    break;
+
+                case 'u':
+                    esc = 2;
+                    break;
+
+                default:
+                    tok->type = CJ_TOKEN_INVALID;
+                    return pos;
+                }
+            }
+            else if (esc >= 2)
+            {
+                if ((ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F') || (ch >= '0' && ch <= '9'))
+                {
+                    esc++;
+                    if (esc == 6)
+                        esc = 0;
+                }
+                else
+                {
+                    tok->type = CJ_TOKEN_INVALID;
+                    return pos;
+                }
+            }
+
             tok->len++;
         }
         else if (tok->type == CJ_TOKEN_PRIMITIVE)
@@ -213,6 +271,10 @@ static unsigned cj_next_token(const unsigned char *str, unsigned len, unsigned p
             break;
         }
     }
+
+    /* string end is detected above and returns */
+    if (tok->type == CJ_TOKEN_STRING)
+        tok->type = CJ_TOKEN_INVALID;
 
     return pos;
 }
@@ -236,8 +298,8 @@ static void cj_trim_trailing_whitespace(cj_ctx *ctx)
     }
 }
 
-void cj_parse_init(cj_ctx *ctx, const char *json, unsigned len,
-                   cj_token *tokens, unsigned tokens_size)
+void cj_parse_init(cj_ctx *ctx, const char *json, unsigned long len,
+                   cj_token *tokens, unsigned long tokens_size)
 {
     if (!ctx)
         return;
@@ -260,7 +322,7 @@ void cj_parse(cj_ctx *ctx)
 {
     int obj_depth;
     int arr_depth;
-    unsigned pos;
+    unsigned long pos;
     cj_token_ref tok_index;
     cj_token_ref tok_parent;
     cj_token *tok;
@@ -414,7 +476,7 @@ void cj_parse(cj_ctx *ctx)
 
 cj_token_ref cj_value_ref(cj_ctx *ctx, cj_token_ref obj, const char *key)
 {
-    unsigned i;
+    cj_token_ref i;
     unsigned k;
     unsigned len;
     cj_token_ref result;
@@ -431,7 +493,7 @@ cj_token_ref cj_value_ref(cj_ctx *ctx, cj_token_ref obj, const char *key)
     for (len = 0; key[len]; len++)
     {}
 
-    for (i = obj + 1; i < ctx->tokens_pos; i++)
+    for (i = obj + 1; i < (cj_token_ref)ctx->tokens_pos; i++)
     {
         tok = &ctx->tokens[i];
         if (tok->type != CJ_TOKEN_NAME_SEP)
@@ -466,18 +528,20 @@ int cj_copy_value(cj_ctx *ctx, char *buf, unsigned size, cj_token_ref obj, const
     unsigned i;
     cj_token_ref ref;
     cj_token *tok;
+    unsigned char *out;
 
-    buf[0] = '\0';
+    out = (unsigned char*)buf;
+    out[0] = '\0';
     ref = cj_value_ref(ctx, obj, key);
 
-    if (ref != CJ_INVALID_TOKEN_INDEX)
+    if (ref >= 0 && ref < (cj_token_ref)ctx->tokens_pos)
     {
         tok = &ctx->tokens[ref];
         if (tok->len < size)
         {
             for (i = 0; i < tok->len; i++)
-                buf[i] = ctx->buf[tok->pos + i];
-            buf[tok->len] = '\0';
+                out[i] = ctx->buf[tok->pos + i];
+            out[tok->len] = '\0';
             return 1;
         }
     }
@@ -489,17 +553,19 @@ int cj_copy_ref(cj_ctx *ctx, char *buf, unsigned size, cj_token_ref ref)
 {
     unsigned i;
     cj_token *tok;
+    unsigned char *out;
 
-    buf[0] = '\0';
+    out = (unsigned char*)buf;
+    out[0] = '\0';
 
-    if (ref != CJ_INVALID_TOKEN_INDEX)
+    if (ref >= 0 && ref < (cj_token_ref)ctx->tokens_pos)
     {
         tok = &ctx->tokens[ref];
         if (tok->len < size)
         {
             for (i = 0; i < tok->len; i++)
-                buf[i] = ctx->buf[tok->pos + i];
-            buf[tok->len] = '\0';
+                out[i] = ctx->buf[tok->pos + i];
+            out[tok->len] = '\0';
             return 1;
         }
     }
