@@ -10,55 +10,18 @@ DDF bundles are self contained **immutable** files with file extension `.ddf`. T
 
 
 
-## Building on Posix environment
+## Building with CMake
 
-1. Compile dependencies
-
-```
-./setup_deps.sh
-```
-
-This downloads and compiles the Bitcoin secp256k1 static library used for signing.
+1. Checkout this repository
 
 2. Compile `ddfb` tool
 
 ```
-make
+cmake -B build -DCMAKE_BUILD_TYPE=MinSizeRel
+cmake --build build --config MinSizeRel
 ```
 
 This creates the `ddfb` command line cli tool with no external dependencies.
-
-3. Cross-compile for Windows using MinGW
-
-```
-make CC=x86_64-w64-mingw32-gcc
-```
-
-## Building on Windows with MSVC
-
-1. Compile dependencies
-
-```
-./setup_deps.sh
-```
-
-This downloads and compiles the Bitcoin secp256k1 static library used for signing.
-
-2. Compile `ddfb` tool
-
-Open a x64 Native Commandline Tools Command Prompt for VS 2022
-
-```
-cd ..
-mkdir ddfb-build
-cd ddfb-build
-cmake ../ddfb
-cmake --build . --config MinSizeRel
-
-```
-
-This creates the `ddfb` command line cli tool in with no external dependencies.
-
 
 ## Usage
 

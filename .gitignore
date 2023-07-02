@@ -1,4 +1,4 @@
-vendor/micro-ecc
+build*
 ddfb
 ddfb.exe
 ddfb-db
