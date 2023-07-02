@@ -1,6 +1,7 @@
 name: C/C++ CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
   pull_request:
@@ -14,7 +15,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Compile
       run: |
-        cmake -DCMAKE_BUILD_TYPE=MinSizeRel
+        cmake -DCMAKE_BUILD_TYPE=MinSizeRel .
         cmake --build . --config MinSizeRel
     - name: Strip binary
       run: strip -s ddfb
@@ -31,12 +32,9 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: ilammy/msvc-dev-cmd@v1
-    - name: Compile dependencies
-      run: bash ${GITHUB_WORKSPACE}/setup_deps.sh
-      shell: bash
     - name: Compile ddfb
       run: |
-        cmake .
+        cmake -DCMAKE_BUILD_TYPE=MinSizeRel .
         cmake --build . --config MinSizeRel
     - name: Print help
       run: .\MinSizeRel\ddfb.exe
