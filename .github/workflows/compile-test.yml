@@ -12,10 +12,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: deps
-      run: bash ${GITHUB_WORKSPACE}/setup_deps.sh
     - name: Compile
-      run: make
+      run: |
+        cmake -DCMAKE_BUILD_TYPE=MinSizeRel
+        cmake --build . --config MinSizeRel
     - name: Strip binary
       run: strip -s ddfb
     - name: Print help
