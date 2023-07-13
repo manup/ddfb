@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -62,6 +63,9 @@
 #define MAX_CJ_TOKENS 32766
 #define VAL_BUF_SIZE 4096
 #define MAX_CONSTANTS 2048
+
+#define SHA256_BLOCK_LENGTH  64
+#define SHA256_DIGEST_LENGTH 32
 
 typedef struct
 {
@@ -1287,6 +1291,43 @@ static ChunkRef GetChunkRef(u8 *data, u32 size, u32 offset, const char *fourcc)
     return result;
 }
 
+/* needed for uECC_sign_deterministic() */
+typedef struct SHA256_HashContext {
+    uECC_HashContext uECC;
+    unsigned long pos;
+    unsigned char buf[1 << 19];
+} SHA256_HashContext;
+
+static void init_SHA256(const uECC_HashContext *base) {
+    SHA256_HashContext *ctx = (SHA256_HashContext *)base;
+    ctx->pos = 0;
+}
+
+static void update_SHA256(const uECC_HashContext *base,
+                          const uint8_t *message,
+                          unsigned message_size) {
+    SHA256_HashContext *ctx = (SHA256_HashContext *)base;
+
+    if (ctx->pos + message_size < sizeof(ctx->buf))
+    {
+        if (message_size)
+        {
+            U_memcpy(&ctx->buf[ctx->pos], message, message_size);
+            ctx->pos += message_size;
+        }
+    }
+    else
+    {
+        assert(0 && "SHA256 buffer too small");
+    }
+}
+
+static void finish_SHA256(const uECC_HashContext *base, uint8_t *hash_result) {
+    SHA256_HashContext *ctx = (SHA256_HashContext *)base;
+
+    lonesha256(hash_result, &ctx->buf[0], ctx->pos);
+}
+
 int ECC_FindSignature(const DDF_Signature *sig, u8 *ddf_data, u32 ddf_size, u8 *sha256, u8 *public_key)
 {
     u32 i;
@@ -1508,9 +1549,35 @@ int ECC_Sign(const char *ddfpath, const char *keypath)
 
     /* signing */
 
+    /*
     if (uECC_sign(private_key, sha256, sizeof(sha256), ddf_sig.serialized_signature, curve) != 1)
     {
         return 0;
+    }
+    */
+
+    {
+        uint8_t tmp[2 * SHA256_DIGEST_LENGTH + SHA256_BLOCK_LENGTH];
+
+        /* note: uECC_HashContext is embedded in SHA256_HashContext */
+        uECC_HashContext *ctx = U_ScratchAlloc(sizeof(SHA256_HashContext));
+
+        ctx->init_hash = init_SHA256;
+        ctx->update_hash = update_SHA256;
+        ctx->finish_hash = finish_SHA256;
+        ctx->block_size = SHA256_BLOCK_LENGTH;
+        ctx->result_size = SHA256_DIGEST_LENGTH;
+        ctx->tmp = &tmp[0];
+
+        if (uECC_sign_deterministic(private_key,
+                                &sha256[0],
+                                sizeof(sha256),
+                                ctx,
+                                ddf_sig.serialized_signature,
+                                curve) != 1)
+        {
+            return 0;
+        }
     }
 
     U_Printf("signature: ");
