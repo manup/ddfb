@@ -32,8 +32,12 @@ if (CMAKE_HOST_UNIX)
     target_compile_definitions(ddfb PRIVATE PL_POSIX)
     target_link_libraries(ddfb PRIVATE m)
 
-#    add_custom_command(TARGET ddfb POST_BUILD COMMAND ${CMAKE_STRIP} $<TARGET_FILE:ddfb>)
 
+    # enable address sanitizer in debug build
+    if (CMAKE_BUILD_TYPE MATCHES "Debug")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -fsanitize=undefined -fsanitize=address")
+        target_link_options(ddfb BEFORE PUBLIC -fsanitize=undefined PUBLIC -fsanitize=address)
+    endif()
 endif (CMAKE_HOST_UNIX)
 
 if (WIN32)
