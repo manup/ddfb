@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v5
     - name: Compile
       run: |
         cmake -DCMAKE_BUILD_TYPE=MinSizeRel .
@@ -22,7 +22,7 @@ jobs:
     - name: Print help
       run: ./ddfb
     - name: Upload linux amd64 binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v5
       with:
         name: ddfb-linux-amd64
         path: ddfb
@@ -30,7 +30,7 @@ jobs:
     name: Build with MSVC
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v5
     - uses: ilammy/msvc-dev-cmd@v1
     - name: Compile ddfb
       run: |
@@ -40,7 +40,7 @@ jobs:
       run: .\MinSizeRel\ddfb.exe
       shell: cmd
     - name: Upload win64 binary
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v5
       with:
         name: ddfb-windows-x64
         path: .\MinSizeRel\ddfb.exe
@@ -48,12 +48,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-linux-amd64, build-win64]
     name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v5
         id: download
 
       - name: Create archives
