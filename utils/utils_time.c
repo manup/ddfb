@@ -57,39 +57,39 @@ int U_TimeToISO8601_UTC(U_time time, void *buf, unsigned len)
     tmt = *mt;
 
     U_sstream_init(&ss, (char*)buf, len);
-    U_sstream_put_i32(&ss, tmt.tm_year + 1900);
+    U_sstream_put_long(&ss, tmt.tm_year + 1900);
 
     U_sstream_put_str(&ss, "-");
     if (tmt.tm_mon + 1 < 10)
         U_sstream_put_str(&ss, "0");
-    U_sstream_put_i32(&ss, tmt.tm_mon + 1);
+    U_sstream_put_long(&ss, tmt.tm_mon + 1);
 
     U_sstream_put_str(&ss, "-");
     if (tmt.tm_mday < 10)
         U_sstream_put_str(&ss, "0");
-    U_sstream_put_i32(&ss, tmt.tm_mday);
+    U_sstream_put_long(&ss, tmt.tm_mday);
 
     U_sstream_put_str(&ss, "T");
     if (tmt.tm_hour < 10)
         U_sstream_put_str(&ss, "0");
-    U_sstream_put_i32(&ss, tmt.tm_hour);
+    U_sstream_put_long(&ss, tmt.tm_hour);
 
     U_sstream_put_str(&ss, ":");
     if (tmt.tm_min < 10)
         U_sstream_put_str(&ss, "0");
-    U_sstream_put_i32(&ss, tmt.tm_min);
+    U_sstream_put_long(&ss, tmt.tm_min);
 
     U_sstream_put_str(&ss, ":");
     if (tmt.tm_sec < 10)
         U_sstream_put_str(&ss, "0");
-    U_sstream_put_i32(&ss, tmt.tm_sec);
+    U_sstream_put_long(&ss, tmt.tm_sec);
 
     U_sstream_put_str(&ss, ".");
     if (millisec < 10)
         U_sstream_put_str(&ss, "00");
     else if (millisec < 100)
         U_sstream_put_str(&ss, "0");
-    U_sstream_put_i32(&ss, millisec);
+    U_sstream_put_long(&ss, millisec);
 
     U_sstream_put_str(&ss, "Z");
 
@@ -135,19 +135,19 @@ U_time U_TimeFromISO8601(const char *str, unsigned len)
     time.tm_isdst = -1;
     U_sstream_init(&ss, (char*)str, len);
 
-    time.tm_year = U_sstream_get_i32(&ss, 10);
+    time.tm_year = U_sstream_get_long(&ss);
     if (ss.pos != 4 || U_sstream_peek_char(&ss) != '-' || time.tm_year < 1900)
         goto err;
     time.tm_year -= 1900;
     U_sstream_seek(&ss, ss.pos + 1);
 
-    time.tm_mon = U_sstream_get_i32(&ss, 10);
+    time.tm_mon = U_sstream_get_long(&ss);
     if (ss.pos != 7 || U_sstream_peek_char(&ss) != '-' || time.tm_mon < 1 || time.tm_mon > 12)
         goto err;
     time.tm_mon -= 1;
     U_sstream_seek(&ss, ss.pos + 1);
 
-    time.tm_mday = U_sstream_get_i32(&ss, 10);
+    time.tm_mday = U_sstream_get_long(&ss);
     if (ss.pos != 10 || time.tm_mday < 1 || time.tm_mday > 31) /* 32 (?) */
         goto err;
 
@@ -155,7 +155,7 @@ U_time U_TimeFromISO8601(const char *str, unsigned len)
     {
         U_sstream_seek(&ss, ss.pos + 1);
 
-        time.tm_hour = U_sstream_get_i32(&ss, 10);
+        time.tm_hour = U_sstream_get_long(&ss);
         if (ss.pos != 13 || time.tm_hour < 0 || time.tm_hour > 23)
             goto err;
 
@@ -163,7 +163,7 @@ U_time U_TimeFromISO8601(const char *str, unsigned len)
         {
             U_sstream_seek(&ss, ss.pos + 1);
 
-            time.tm_min = U_sstream_get_i32(&ss, 10);
+            time.tm_min = U_sstream_get_long(&ss);
             if (ss.pos != 16 || time.tm_min < 0 || time.tm_min > 59)
                 goto err;
 
@@ -171,7 +171,7 @@ U_time U_TimeFromISO8601(const char *str, unsigned len)
             {
                 U_sstream_seek(&ss, ss.pos + 1);
 
-                time.tm_sec = U_sstream_get_i32(&ss, 10);
+                time.tm_sec = U_sstream_get_long(&ss);
                 if (ss.pos != 19 || time.tm_sec < 0 || time.tm_sec > 60)
                     goto err;
 
@@ -184,7 +184,7 @@ U_time U_TimeFromISO8601(const char *str, unsigned len)
                 if (U_sstream_peek_char(&ss) == '.' || U_sstream_peek_char(&ss) == ',')
                 {
                     U_sstream_seek(&ss, ss.pos + 1);
-                    millisec = U_sstream_get_i32(&ss, 10);
+                    millisec = U_sstream_get_long(&ss);
                 }
             }
         }
