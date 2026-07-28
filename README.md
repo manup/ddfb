@@ -50,3 +50,16 @@ The keygen command creates two files `name-for-key` and `name-for-key.pub` which
 The sign command adds the signature over a bundle to the `.ddf` file (if it isn't already signed by that key).
 
 A bundle may contain multiple signatures, e. g. in order to raise the status of a bundle from beta to stable after testing.
+
+## External Libraries
+
+`ddfb` bundles several lightweight, header-only or single-file libraries under `utils/` and `vendor/`. All are vendored directly — no external dependencies are required at build time.
+
+| Library | Location | License | Upstream |
+|---------|----------|---------|----------|
+| u_sstream | `utils/u_sstream.{c,h}` | BSD-3-Clause | [~cryo/u_sstream](https://git.sr.ht/~cryo/u_sstream) |
+| u_bstream | `utils/u_bstream.{c,h}` | BSD-3-Clause | [~cryo/u_bstream](https://git.sr.ht/~cryo/u_bstream) |
+| u_base64 | `utils/u_base64.{c,h}` | BSD-3-Clause | [~cryo/u_base64](https://git.sr.ht/~cryo/u_base64) |
+| cj (JSON parser) | `utils/cj.{c,h}` | BSD-3-Clause | [~cryo/cj](https://git.sr.ht/~cryo/cj) |
+| lonesha256 | `vendor/lonesha256.h` | CC0 / Public Domain | [lonesha256](https://github.com/ThomasBellemain/LoneSHA256) |
+| micro-ecc (uECC) | fetched via CMake | MIT | [kmackay/micro-ecc](https://github.com/kmackay/micro-ecc) v1.1 |
